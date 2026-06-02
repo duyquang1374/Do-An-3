@@ -1,0 +1,33 @@
+# STM32 Build files
+Ket_/Debug/
+Ket_/Release/
+Ket_/.settings/
+*.o
+*.d
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.su
+
+# Python
+__pycache__/
+*.pyc
+.env
+venv/
+
+# Web data files (runtime generated)
+Web/db.json
+Web/log.json
+Web/fingerprints.json
+Web/dataset/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+*.swp
+*.swo

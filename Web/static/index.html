@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SafeVault — Khóa bảo mật két sắt gia đình</title>
+  <meta name="description" content="Hệ thống khóa bảo mật 2 lớp: mã PIN + nhận diện khuôn mặt AI cho két sắt gia đình." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- MOBILE APP LAYOUT -->
+<div class="app-container">
+
+<!-- ===== MAIN CONTENT ===== -->
+<main class="main-content" id="main">
+
+  <!-- MOBILE TOPBAR -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="status-indicator online" id="server-status-dot"></div>
+    </div>
+    <div class="topbar-title" id="page-title">SafeVault</div>
+    <div class="topbar-actions">
+      <button class="btn-icon" onclick="refreshAll()" title="Làm mới">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="23 4 23 10 17 10"/>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ==================== PAGE: DASHBOARD ==================== -->
+  <section class="page active" id="page-dashboard">
+    <div class="page-header">
+      <h1 class="page-title">Dashboard</h1>
+      <p class="page-subtitle">Giám sát két sắt gia đình theo thời gian thực</p>
+    </div>
+
+    <!-- INTRUSION ALERT -->
+    <div id="intrusion-panel" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:14px;padding:16px 20px;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <span style="font-size:28px;">🚨</span>
+        <div style="flex:1;">
+          <div style="font-size:15px;font-weight:700;color:#f87171;letter-spacing:.5px;">⚠️ CẢNH BÁO XÂM NHẬP!</div>
+          <div id="intrusion-time" style="font-size:12px;color:#ef4444;font-family:monospace;"></div>
+          <div id="intrusion-msg" style="font-size:12px;color:#94a3b8;">Phát hiện rung/va đập bất thường vào két sắt</div>
+        </div>
+        <button onclick="dismissIntrusion()" style="background:none;border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:8px;padding:6px 12px;cursor:pointer;">✕ Bỏ qua</button>
+      </div>
+    </div>
+    <!-- FACE AUTH BUTTON — Hiển thị khi PIN đúng -->
+    <div id="face-auth-panel" style="display:none;background:linear-gradient(135deg,rgba(212,175,55,0.12),rgba(139,92,246,0.08));border:1px solid rgba(212,175,55,0.4);border-radius:16px;padding:20px 24px;margin-bottom:20px;animation:fadeSlideIn 0.4s ease;">
+      <!-- Trạng thái chờ -->
+      <div id="face-auth-idle">
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+          <div style="width:52px;height:52px;background:linear-gradient(135deg,#D4AF37,#9A7D0A);border-radius:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.5" width="28" height="28">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+            </svg>
+          </div>
+          <div style="flex:1;min-width:160px;">
+            <div style="font-size:16px;font-weight:700;color:#F5D76E;margin-bottom:4px;">✅ Yêu cầu mở từ xa</div>
+            <div style="font-size:13px;color:#94a3b8;line-height:1.5;">Xác thực khuôn mặt để mở két. Camera sẽ tự động chụp sau 3 giây.</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;">
+          <button onclick="startFaceAuthInline()" style="flex:1;min-width:200px;background:linear-gradient(135deg,#D4AF37,#9A7D0A);border:none;color:#000;border-radius:12px;padding:14px 24px;font-size:15px;font-weight:700;cursor:pointer;text-align:center;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 4px 20px rgba(212,175,55,0.3);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="20" height="20">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
+            </svg>
+            Bắt đầu xác thực →
+          </button>
+          <button onclick="dismissFaceAuth()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:#94a3b8;border-radius:12px;padding:14px 18px;font-size:13px;cursor:pointer;white-space:nowrap;">✕ Bỏ qua</button>
+        </div>
+        <div style="margin-top:12px;display:flex;align-items:center;gap:8px;">
+          <div style="width:8px;height:8px;border-radius:50%;background:#D4AF37;animation:blink 1.2s ease-in-out infinite;"></div>
+          <span id="face-auth-timer" style="font-size:12px;color:#666;font-family:'JetBrains Mono',monospace;">Còn 15s</span>
+        </div>
+      </div>
+      <!-- Camera inline -->
+      <div id="face-auth-camera" style="display:none;text-align:center;">
+        <video id="face-auth-video" autoplay playsinline muted style="width:100%;max-width:280px;border-radius:12px;border:2px solid var(--gold-dim);transform:scaleX(-1);"></video>
+        <canvas id="face-auth-canvas" style="display:none;"></canvas>
+        <div id="face-auth-countdown" style="margin-top:12px;font-size:28px;font-weight:700;color:var(--gold);">3</div>
+        <p id="face-auth-status" style="color:var(--text-muted);font-size:12px;margin-top:4px;">Giữ mặt trong khung — tự động chụp...</p>
+        <button onclick="dismissFaceAuth()" class="btn-secondary" style="margin-top:12px;">Hủy</button>
+      </div>
+    </div>
+    <!-- STAT CARDS -->
+    <div class="stats-grid">
+      <div class="stat-card" id="stat-users">
+        <div class="stat-icon purple">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value" id="total-users">0</div>
+          <div class="stat-label">Thành viên đăng ký</div>
+        </div>
+        <div class="stat-trend up">↑ Đã đăng ký</div>
+      </div>
+
+      <div class="stat-card" id="stat-access">
+        <div class="stat-icon blue">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+            <polyline points="10 17 15 12 10 7"/>
+            <line x1="15" y1="12" x2="3" y2="12"/>
+          </svg>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value" id="total-access">0</div>
+          <div class="stat-label">Lần mở két</div>
+        </div>
+        <div class="stat-trend">Tổng cộng</div>
+      </div>
+
+      <div class="stat-card" id="stat-granted">
+        <div class="stat-icon green">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value" id="total-granted">0</div>
+          <div class="stat-label">Xác minh thành công</div>
+        </div>
+        <div class="stat-trend up">Granted</div>
+      </div>
+
+      <div class="stat-card" id="stat-denied">
+        <div class="stat-icon red">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="15" y1="9" x2="9" y2="15"/>
+            <line x1="9" y1="9" x2="15" y2="15"/>
+          </svg>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value" id="total-denied">0</div>
+          <div class="stat-label">Bị từ chối</div>
+        </div>
+        <div class="stat-trend down">Denied</div>
+      </div>
+    </div>
+
+    <!-- REMOTE UNLOCK PANEL -->
+    <div class="glass-card" style="margin-bottom:20px;border:1px solid rgba(212,175,55,0.15);overflow:hidden;">
+      <div id="remote-unlock-idle" style="text-align:center;padding:24px 16px;">
+        <div style="width:64px;height:64px;background:linear-gradient(135deg,#D4AF37,#9A7D0A);border-radius:18px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.5" width="32" height="32"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </div>
+        <h3 style="color:var(--gold);margin-bottom:6px;font-size:18px;">Mở két từ xa</h3>
+        <p style="color:var(--text-muted);font-size:13px;margin-bottom:20px;line-height:1.5;">Xác thực khuôn mặt để mở két an toàn.<br>Camera tự động chụp sau 3 giây.</p>
+        <button onclick="startRemoteUnlock()" class="btn-primary" style="width:100%;padding:16px;font-size:16px;border-radius:14px;">
+          🔓 Bắt đầu xác thực khuôn mặt
+        </button>
+      </div>
+      <div id="remote-unlock-camera" style="display:none;text-align:center;padding:20px 16px;">
+        <video id="remote-video" autoplay playsinline muted style="width:100%;max-width:280px;border-radius:14px;border:2px solid var(--gold-dim);transform:scaleX(-1);"></video>
+        <canvas id="remote-canvas" style="display:none;"></canvas>
+        <div id="remote-countdown" style="margin-top:14px;font-size:32px;font-weight:800;color:var(--gold);">3</div>
+        <p id="remote-status" style="color:var(--text-secondary);font-size:13px;margin-top:6px;">Giữ mặt trong khung — tự động chụp...</p>
+        <button onclick="cancelRemoteUnlock()" class="btn-secondary" style="margin-top:14px;">Hủy</button>
+      </div>
+    </div>
+
+    <!-- OTP PANEL -->
+    <div class="surgery-panel" id="otp-panel">
+      <div class="surgery-panel-inner">
+        <!-- Trạng thái: Chưa có OTP -->
+        <div id="otp-idle">
+          <div style="text-align:center; padding: 24px 16px;">
+            <div style="font-size:36px; margin-bottom:12px;">🔑</div>
+            <h3 style="color:var(--gold); margin-bottom:8px;">Mã mở két 1 lần (OTP)</h3>
+            <p style="color:var(--text-muted); font-size:13px; margin-bottom:20px; line-height:1.5;">
+              Tạo mã 6 số để chia sẻ cho người nhà.<br>Yêu cầu xác thực khuôn mặt trước khi tạo.
+            </p>
+            <button class="btn-primary" onclick="startOTPGenerate()" id="btn-gen-otp" style="width:100%;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18">
+                <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              Tạo mã OTP
+            </button>
+          </div>
+        </div>
+        <!-- Trạng thái: Camera xác thực -->
+        <div id="otp-camera" style="display:none; text-align:center; padding:16px;">
+          <h3 style="color:var(--gold); margin-bottom:12px;">Xác thực khuôn mặt</h3>
+          <video id="otp-video" autoplay playsinline muted style="width:100%; max-width:280px; border-radius:12px; border:2px solid var(--gold-dim); transform:scaleX(-1);"></video>
+          <canvas id="otp-canvas" style="display:none;"></canvas>
+          <div id="otp-countdown-box" style="margin-top:12px; font-size:24px; font-weight:700; color:var(--gold);">3</div>
+          <p id="otp-status-text" style="color:var(--text-muted); font-size:12px; margin-top:4px;">Giữ mặt trong khung — tự động chụp...</p>
+          <button class="btn-secondary" onclick="cancelOTP()" style="margin-top:12px;">Hủy</button>
+        </div>
+        <!-- Trạng thái: Hiển thị OTP -->
+        <div id="otp-result" style="display:none; text-align:center; padding:24px 16px;">
+          <div style="font-size:36px; margin-bottom:8px;">✅</div>
+          <h3 style="color:var(--green); margin-bottom:4px;">Mã OTP đã tạo!</h3>
+          <p style="color:var(--text-muted); font-size:12px; margin-bottom:16px;">Chia sẻ mã này cho người cần mở két</p>
+          <div id="otp-code-display" style="font-size:36px; font-weight:800; letter-spacing:8px; color:var(--gold); font-family:'JetBrains Mono',monospace; background:var(--gold-dim); padding:16px; border-radius:12px; margin-bottom:12px;">------</div>
+          <div id="otp-countdown" style="color:var(--text-muted); font-size:13px; margin-bottom:16px;">Hết hạn sau: 5:00</div>
+          <button class="btn-secondary" onclick="resetOTPPanel()">Đóng</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- LỊCH SỬ PHÒNG MỔ GẦN ĐÂY -->
+    <div class="recent-section">
+      <div class="section-header">
+        <h2 class="section-title">Lịch sử mở két gần đây</h2>
+        <button class="btn-text" onclick="switchPage('logs')">Xem tất cả →</button>
+      </div>
+      <div class="recent-logs" id="recent-logs">
+        <div class="empty-state">
+          <div class="empty-icon">🔐</div>
+          <p>Chưa có lần mở két nào</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== PAGE: FINGERPRINT ==================== -->
+  <section class="page" id="page-fingerprint">
+    <div class="page-header">
+      <h1 class="page-title">🖐️ Đăng ký Vân tay</h1>
+      <p class="page-subtitle">Thêm vân tay để mở két bằng cảm biến AS608</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;padding:16px;background:rgba(34,197,94,0.06);border-radius:12px;border:1px solid rgba(34,197,94,0.15);">
+      <div style="font-size:32px;">🔒</div>
+      <div style="flex:1;"><div style="font-size:14px;font-weight:600;color:var(--green-400);margin-bottom:4px;">Bảo mật Lớp 2</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.5;">Vân tay kết hợp mã PIN để xác thực 2 lớp khi mở két tại chỗ.</div></div>
+    </div>
+    <div class="glass-card" style="margin-bottom:20px;">
+      <div class="form-group"><label class="form-label" for="fp-id">Vị trí lưu (ID: 0–126)</label><input class="form-input" type="number" id="fp-id" placeholder="0" min="0" max="126" value="0" /></div>
+      <div class="form-group"><label class="form-label" for="fp-label">Tên / Ghi chú</label><input class="form-input" type="text" id="fp-label" placeholder="VD: Ngón trỏ phải - Quang" autocomplete="off" /></div>
+      <button class="btn btn-primary btn-large" id="fp-enroll-btn" onclick="startFingerprintEnroll()" style="width:100%;background:linear-gradient(135deg,#22c55e,#16a34a);">🖐️ Bắt đầu đăng ký vân tay</button>
+      <div id="fp-status" style="display:none;margin-top:16px;padding:16px;border-radius:12px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);text-align:center;">
+        <div id="fp-status-icon" style="font-size:36px;margin-bottom:8px;">⏳</div>
+        <div id="fp-status-text" style="color:var(--text-primary);font-weight:600;"></div>
+        <div id="fp-status-sub" style="color:var(--text-muted);font-size:12px;margin-top:4px;"></div>
+      </div>
+    </div>
+    <div class="glass-card">
+      <h4 style="color:var(--gold);margin-bottom:12px;">📋 Quy trình</h4>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;align-items:center;gap:12px;"><div style="width:26px;height:26px;background:var(--gold-dim);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--gold);flex-shrink:0;">1</div><span style="font-size:13px;color:var(--text-secondary);">Nhập ID + tên, nhấn Bắt đầu</span></div>
+        <div style="display:flex;align-items:center;gap:12px;"><div style="width:26px;height:26px;background:var(--gold-dim);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--gold);flex-shrink:0;">2</div><span style="font-size:13px;color:var(--text-secondary);">Đặt ngón tay lên cảm biến (lần 1)</span></div>
+        <div style="display:flex;align-items:center;gap:12px;"><div style="width:26px;height:26px;background:var(--gold-dim);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--gold);flex-shrink:0;">3</div><span style="font-size:13px;color:var(--text-secondary);">Nhấc tay rồi đặt lại (lần 2)</span></div>
+        <div style="display:flex;align-items:center;gap:12px;"><div style="width:26px;height:26px;background:rgba(34,197,94,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;">✅</div><span style="font-size:13px;color:var(--text-secondary);">Hoàn tất! Vân tay lưu vào chip AS608</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== PAGE: FACE ==================== -->
+  <section class="page" id="page-face">
+    <div class="page-header"><h1 class="page-title">👤 Đăng ký Khuôn mặt</h1><p class="page-subtitle">Thêm thành viên vào hệ thống nhận diện AI</p></div>
+    <div class="register-layout">
+      <div class="glass-card camera-panel">
+        <div class="camera-header"><h3>📷 Camera Preview</h3><div class="camera-controls"><span class="capture-counter-badge" id="capture-counter">0 / 5</span><button class="btn btn-sm" id="start-cam-btn" onclick="startCamera()">Bật Camera</button><button class="btn btn-sm btn-danger" id="stop-cam-btn" onclick="stopCamera()" style="display:none;">Tắt</button></div></div>
+        <div class="video-container" id="video-container"><div class="camera-placeholder" id="camera-placeholder"><div class="camera-placeholder-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="64" height="64"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div><p>Nhấn "Bật Camera" để bắt đầu</p></div><video id="webcam" autoplay playsinline style="display:none;"></video><canvas id="snapshot-canvas" style="display:none;"></canvas><div class="face-overlay" id="face-overlay" style="display:none;"><div class="face-corner tl"></div><div class="face-corner tr"></div><div class="face-corner bl"></div><div class="face-corner br"></div><div class="scan-line"></div></div></div>
+        <div class="snapshot-preview" id="snapshot-preview" style="display:none;"><h4>📸 Ảnh đã chụp</h4><div class="multi-preview-grid" id="multi-preview-grid"></div><button class="btn btn-sm btn-outline" onclick="retakePhoto()">🗑 Xóa &amp; chụp lại</button></div>
+        <div class="camera-actions" id="camera-actions" style="display:none;"><button class="btn btn-capture" id="capture-btn" onclick="capturePhoto()"><span class="capture-icon">📸</span> Chụp ảnh</button></div>
+      </div>
+      <div class="glass-card form-panel">
+        <h3>👤 Thông tin Thành viên</h3>
+        <div class="form-group"><label class="form-label" for="reg-name">Họ và tên</label><input class="form-input" type="text" id="reg-name" placeholder="Nhập tên..." autocomplete="off" /></div>
+        <div class="form-group"><label class="form-label">Trạng thái</label><div class="status-row" id="reg-status"><div class="status-step done" id="step-name"><div class="step-icon">✓</div><span>Nhập tên</span></div><div class="status-step" id="step-photo"><div class="step-icon">2</div><span>Chụp 5 ảnh</span></div><div class="status-step" id="step-done"><div class="step-icon">3</div><span>Hoàn thành</span></div></div></div>
+        <button class="btn btn-primary btn-large" id="register-btn" onclick="registerUser()">Đăng ký</button>
+        <div class="register-tips"><h4>💡 Hướng dẫn</h4><ul><li><b>1:</b> Nhìn thẳng</li><li><b>2:</b> Nghiêng trái</li><li><b>3:</b> Nghiêng phải</li><li><b>4:</b> Ngẩng lên</li><li><b>5:</b> Cúi xuống</li></ul><p style="margin-top:8px;color:var(--text-muted);font-size:12px;">📌 Tối thiểu 3, khuyến nghị 5 ảnh</p></div>
+      </div>
+    </div>
+    <div id="register-result"></div>
+  </section>
+
+  <!-- ==================== PAGE: USERS ==================== -->
+  <section class="page" id="page-users">
+    <div class="page-header">
+      <h1 class="page-title">Thành viên</h1>
+      <p class="page-subtitle">Quản lý dữ liệu khuôn mặt và vân tay đã đăng ký</p>
+    </div>
+
+    <!-- KHU VỰC: KHUÔN MẶT -->
+    <div style="margin-bottom:24px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:32px;height:32px;background:linear-gradient(135deg,#D4AF37,#9A7D0A);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;">👤</div>
+          <h3 style="color:var(--gold);font-size:16px;margin:0;">Khuôn mặt</h3>
+        </div>
+        <button class="btn btn-sm btn-outline" onclick="switchPage('face')">+ Thêm</button>
+      </div>
+      <div class="toolbar">
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="user-search" placeholder="Tìm kiếm..." oninput="filterUsers()" />
+        </div>
+        <button class="btn btn-sm btn-outline" onclick="loadUsers()">🔄</button>
+      </div>
+      <div class="users-grid" id="users-grid">
+        <div class="empty-state"><div class="empty-icon">👤</div><p>Chưa có khuôn mặt nào</p><button class="btn btn-sm btn-primary" onclick="switchPage('face')">+ Đăng ký ngay</button></div>
+      </div>
+    </div>
+
+    <!-- KHU VỰC: VÂN TAY -->
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:32px;height:32px;background:linear-gradient(135deg,#22c55e,#16a34a);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;">🖐️</div>
+          <h3 style="color:var(--green-400);font-size:16px;margin:0;">Vân tay</h3>
+        </div>
+        <button class="btn btn-sm btn-outline" onclick="switchPage('fingerprint')">+ Thêm</button>
+      </div>
+      <div class="users-grid" id="fingerprints-grid">
+        <div class="empty-state"><div class="empty-icon">🖐️</div><p>Chưa có vân tay nào</p><button class="btn btn-sm btn-primary" onclick="switchPage('fingerprint')">+ Đăng ký ngay</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== PAGE: LOGS ==================== -->
+  <section class="page" id="page-logs">
+    <div class="page-header">
+      <h1 class="page-title">Lịch sử mở két</h1>
+      <p class="page-subtitle">Nhật ký mở két sắt theo thời gian thực</p>
+    </div>
+
+    <div class="toolbar">
+      <div class="filter-group">
+        <button class="filter-btn active" data-filter="all" onclick="filterLogs('all', this)">Tất cả</button>
+        <button class="filter-btn" data-filter="granted" onclick="filterLogs('granted', this)">
+          <span class="dot green"></span>Thành công
+        </button>
+        <button class="filter-btn" data-filter="denied" onclick="filterLogs('denied', this)">
+          <span class="dot red"></span>Từ chối
+        </button>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-sm btn-outline" onclick="loadLogs()">🔄 Làm mới</button>
+        <button class="btn btn-sm btn-danger" onclick="clearLogs()">🗑 Xóa log</button>
+      </div>
+    </div>
+
+    <div class="logs-table-wrapper">
+      <table class="logs-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Thành viên</th>
+            <th>Kết quả</th>
+            <th>Thời gian</th>
+          </tr>
+        </thead>
+        <tbody id="logs-tbody">
+          <tr>
+            <td colspan="4" class="empty-row">
+              <div class="empty-state">
+                <div class="empty-icon">🏥</div>
+                <p>Chưa có dữ liệu</p>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+</div> <!-- end app-container -->
+
+<!-- ===== BOTTOM NAVIGATION ===== -->
+<nav class="bottom-nav">
+  <a class="nav-item active" data-page="dashboard" id="nav-dashboard">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+    <span>Nhà</span>
+  </a>
+  <a class="nav-item" data-page="fingerprint" id="nav-fingerprint">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 10a2 2 0 0 0-2 2c0 1.02.1 2.51.4 4"/><path d="M8.5 8.36a4 4 0 0 1 7 0"/><path d="M14 13c0 .34-.01.7-.03 1.06"/><path d="M4.26 10.15a8 8 0 0 1 15.48 0"/><path d="M6 12a6 6 0 0 1 12 0c0 2.49-.7 4.74-1.81 6.5"/><path d="M10.73 18.66a10 10 0 0 1-.63-3.16"/></svg>
+    <span>Vân tay</span>
+  </a>
+  <a class="nav-item" data-page="face" id="nav-face">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+    <span>Khuôn mặt</span>
+  </a>
+  <a class="nav-item" data-page="users" id="nav-users">
+    <div style="position:relative;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span class="nav-badge" id="users-badge">0</span>
+    </div>
+    <span>Thành viên</span>
+  </a>
+  <a class="nav-item" data-page="logs" id="nav-logs">
+    <div style="position:relative;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <span class="nav-badge pulse" id="logs-badge">0</span>
+    </div>
+    <span>Lịch sử</span>
+  </a>
+</nav>
+
+<!-- ===== EMERGENCY MODAL ===== -->
+<div class="modal-overlay" id="emergency-modal">
+  <div class="modal modal-emergency">
+    <div class="emergency-modal-header">
+      <div class="emergency-modal-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="36" height="36">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+      </div>
+      <div>
+        <h3 id="emergency-modal-title">⚠️ Mở cửa khẩn cấp</h3>
+        <p class="emergency-subtitle" id="emergency-modal-desc">Thao tác này sẽ mở khóa NGAY LẬP TỨC</p>
+      </div>
+    </div>
+    <div class="emergency-warning">
+      <span>🔴</span> Lệnh sẽ gửi qua MQTT đến ESP32 và mở relay ngay lập tức.
+      Toàn bộ hoạt động được ghi lại vào log.
+    </div>
+    <div class="emergency-countdown-wrap" id="emergency-countdown-wrap">
+      <div class="countdown-label">Tự động hủy sau</div>
+      <div class="countdown-ring">
+        <svg class="countdown-svg" viewBox="0 0 80 80">
+          <circle cx="40" cy="40" r="33" class="countdown-track"/>
+          <circle cx="40" cy="40" r="33" class="countdown-progress" id="countdown-circle"/>
+        </svg>
+        <div class="countdown-number" id="countdown-number">5</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeEmergency()" id="emergency-cancel-btn">✕ Hủy</button>
+      <button class="btn btn-emergency-confirm" id="emergency-confirm-btn" onclick="confirmEmergency()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+        XÁC NHẬN MỞ KHÓA
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<!-- ===== DELETE USER MODAL ===== -->
+<div class="modal-overlay" id="delete-modal">
+  <div class="modal">
+    <div class="modal-icon danger-icon">⚠️</div>
+    <h3>Xóa thành viên</h3>
+    <p>Bạn có chắc muốn xóa <strong id="delete-name"></strong>?<br>Hành động này không thể hoàn tác.</p>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeDeleteModal()">Hủy</button>
+      <button class="btn btn-danger" onclick="confirmDelete()">Xóa</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
