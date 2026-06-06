@@ -57,6 +57,27 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define relay_Pin GPIO_PIN_13
+#define relay_GPIO_Port GPIOC
+#define key_Pin GPIO_PIN_0
+#define key_GPIO_Port GPIOA
+#define keyA1_Pin GPIO_PIN_1
+#define keyA1_GPIO_Port GPIOA
+#define keyA2_Pin GPIO_PIN_2
+#define keyA2_GPIO_Port GPIOA
+#define keyA3_Pin GPIO_PIN_3
+#define keyA3_GPIO_Port GPIOA
+#define keyA4_Pin GPIO_PIN_4
+#define keyA4_GPIO_Port GPIOA
+#define keyA5_Pin GPIO_PIN_5
+#define keyA5_GPIO_Port GPIOA
+#define keyA6_Pin GPIO_PIN_6
+#define keyA6_GPIO_Port GPIOA
+#define touch_Pin GPIO_PIN_7
+#define touch_GPIO_Port GPIOA
+#define touch_EXTI_IRQn EXTI9_5_IRQn
+#define button_Pin GPIO_PIN_0
+#define button_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

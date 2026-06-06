@@ -106,9 +106,11 @@ function connectSSE() {
     if (data.status === "ok") {
       if (iconEl) iconEl.textContent = "✅";
       if (textEl) textEl.textContent = `Đăng ký thành công! ID: ${data.finger_id}`;
-      if (subEl) subEl.textContent = "Vân tay đã được lưu vào cảm biến.";
+      if (subEl) subEl.textContent = `Tên: ${data.label || 'Fingerprint_' + data.finger_id} — Đã lưu vào cảm biến.`;
       if (statusEl) { statusEl.style.background = "rgba(34,197,94,0.08)"; statusEl.style.borderColor = "rgba(34,197,94,0.2)"; }
-      showToast("success", `🖐️ Đăng ký vân tay ID ${data.finger_id} thành công!`, 6000);
+      showToast("success", `🖐️ Đăng ký vân tay "${data.label || data.finger_id}" thành công!`, 6000);
+      // Reload danh sách vân tay
+      if (typeof loadFingerprints === "function") loadFingerprints();
     } else {
       if (iconEl) iconEl.textContent = "❌";
       if (textEl) textEl.textContent = "Đăng ký thất bại!";
@@ -316,7 +318,7 @@ async function captureRemoteUnlock() {
   if (statusEl) statusEl.textContent = "Đang xử lý AI...";
 
   try {
-    const res = await fetch("/mobile/scan", {
+    const res = await fetch("/remote/unlock", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ image: b64 })

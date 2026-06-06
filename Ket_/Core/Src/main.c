@@ -86,9 +86,14 @@ uint8_t fingerFailCount = 0;   // Số lần quét vân tay sai
 uint16_t enrollId = 0;         // ID vân tay đang đăng ký
 uint8_t enrollStep = 0;        // Bước: 0=chờ lần1, 1=chờ nhấc tay, 2=chờ lần2
 
-// ── Nút nhấn vật lý PA7 & Cấu hình Layer 2 ──
+// ── Cấu hình Layer 2 ──
 uint32_t layer2_enabled = 1;   // Trạng thái bật/tắt (1=Bật, 0=Tắt)
-uint32_t lastPA7Press = 0;     // Timestamp để chống dội phím (debounce)
+uint32_t lastPB0Press = 0;     // Debounce cho nút PB0
+
+// ── Chế độ ngủ (Sleep / STOP Mode) ──
+#define SLEEP_TIMEOUT_MS  15000  // 15 giây không thao tác → đi ngủ
+volatile uint8_t isSleeping = 0;       // 1 = đang ngủ
+volatile uint8_t wakeupSource = 0;     // 0=none, 1=touch, 2=uart
 
 #define FLASH_USER_PAGE_ADDR   ((uint32_t)0x0800FC00) /* Page 63 */
 
@@ -137,6 +142,8 @@ void ProcessUARTCommand(void);
 void Relay_Open(void);
 void Relay_Close(void);
 void ResetToMenu(void);
+void EnterSleepMode(void);
+void WakeupFromSleep(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -417,30 +424,38 @@ int main(void)
     /* USER CODE BEGIN 3 */
 
     // ══════════════════════════════════════
-    //  ĐỌC NÚT NHẤN PA7 (BẬT/TẮT LAYER 2)
+    //  KIỂM TRA AUTO-SLEEP (15s không thao tác)
     // ══════════════════════════════════════
-    if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_7) == GPIO_PIN_RESET) {
-        if (HAL_GetTick() - lastPA7Press > 500) { // Chống nhiễu 500ms
-            layer2_enabled = !layer2_enabled;
-            Write_Layer2_Status(layer2_enabled);
-            
-            ssd1306_Fill(Black);
-            ssd1306_SetCursor(0, 10);
-            if (layer2_enabled) {
-                ssd1306_WriteString("Lop 2: BAT", Font_11x18, White);
-                OLED_ShowText("", "Da bat bao mat", "2 lop (PIN+VanTay)");
-            } else {
-                ssd1306_WriteString("Lop 2: TAT", Font_11x18, White);
-                OLED_ShowText("", "Chi dung", "mat khau PIN");
-            }
-            HAL_Delay(1500); // Hiển thị trạng thái trong 1.5 giây
-            
-            lastActionTime = HAL_GetTick(); // Reset thời gian chờ
-            if (sysState == STATE_MENU) OLED_ShowMenu();
-            else if (sysState == STATE_INPUT_PIN) OLED_ShowPinEntry();
-            else if (sysState == STATE_INPUT_OTP) OLED_ShowOTPEntry();
+    if (!isSleeping && sysState == STATE_MENU) {
+      if (HAL_GetTick() - lastActionTime > SLEEP_TIMEOUT_MS) {
+        EnterSleepMode();
+        // === CPU thức dậy tại đây sau khi có ngắt ===
+        WakeupFromSleep();
+        continue;
+      }
+    }
+
+    // ══════════════════════════════════════
+    //  NÚT BẤM PB0: BẬT/TẮT LAYER 2
+    // ══════════════════════════════════════
+    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET) {
+      if (HAL_GetTick() - lastPB0Press > 500) {
+        layer2_enabled = !layer2_enabled;
+        Write_Layer2_Status(layer2_enabled);
+
+        if (layer2_enabled) {
+          OLED_ShowText("== CAU HINH ==", "Lop 2: BAT", "(PIN + Van tay)");
+        } else {
+          OLED_ShowText("== CAU HINH ==", "Lop 2: TAT", "(Chi dung PIN)");
         }
-        lastPA7Press = HAL_GetTick();
+        HAL_Delay(1500);
+
+        lastActionTime = HAL_GetTick();
+        if (sysState == STATE_MENU) OLED_ShowMenu();
+        else if (sysState == STATE_INPUT_PIN) OLED_ShowPinEntry();
+        else if (sysState == STATE_INPUT_OTP) OLED_ShowOTPEntry();
+      }
+      lastPB0Press = HAL_GetTick();
     }
 
     // ══════════════════════════════════════
@@ -923,40 +938,168 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(relay_GPIO_Port, relay_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PC13 */
-  GPIO_InitStruct.Pin = GPIO_PIN_13;
+  /*Configure GPIO pin : relay_Pin */
+  GPIO_InitStruct.Pin = relay_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+  HAL_GPIO_Init(relay_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA0 PA1 PA2 PA3 */
+  /*Configure GPIO pins : key_Pin keyA1_Pin keyA2_Pin keyA3_Pin
+                           keyA4_Pin keyA5_Pin keyA6_Pin */
+  GPIO_InitStruct.Pin = key_Pin|keyA1_Pin|keyA2_Pin|keyA3_Pin
+                          |keyA4_Pin|keyA5_Pin|keyA6_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : touch_Pin */
+  GPIO_InitStruct.Pin = touch_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(touch_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : button_Pin */
+  GPIO_InitStruct.Pin = button_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(button_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+  // Override CubeMX: Keypad Rows PA0-PA3 = Output Push-Pull
   GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA4 PA5 PA6 */
+  // Override CubeMX: Keypad Cols PA4-PA6 = Input Pull-Up
   GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_7;
+  // Nút bấm PB0: Bật/Tắt Layer 2 (Input Pull-Up, nhấn = LOW)
+  GPIO_InitStruct.Pin = GPIO_PIN_0;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /* USER CODE BEGIN MX_GPIO_Init_2 */
-
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
+
+// ══════════════════════════════════════
+//  CHẾ ĐỘ NGỦ (STOP MODE)
+// ══════════════════════════════════════
+void EnterSleepMode(void) {
+  isSleeping = 1;
+  wakeupSource = 0;
+
+  // 1. Tắt màn hình OLED
+  ssd1306_Fill(Black);
+  ssd1306_UpdateScreen(&hi2c1);
+  ssd1306_SetDisplayOn(&hi2c1, 0);  // Display OFF
+
+  // 2. Đảm bảo Relay đang khóa
+  Relay_Close();
+
+  // 3. Cấu hình PA10 (UART1_RX) thành ngắt EXTI để đánh thức từ ESP32
+  //    (UART start bit = falling edge trên RX)
+  HAL_UART_DeInit(&huart1);  // Tắt UART1 tạm thời
+  GPIO_InitTypeDef gpioInit = {0};
+  gpioInit.Pin = GPIO_PIN_10;
+  gpioInit.Mode = GPIO_MODE_IT_FALLING;  // Start bit UART = falling edge
+  gpioInit.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOA, &gpioInit);
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
+  // 4. Thông báo ESP32 rằng STM32 đang ngủ
+  // (UART đã tắt nên không gửi được, ESP32 sẽ tự detect qua heartbeat)
+
+  // 5. Đi vào STOP Mode - CPU dừng hoàn toàn tại đây
+  HAL_SuspendTick();
+  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_SLEEPENTRY_WFI);
+  // ──── CPU DỪNG TẠI ĐÂY cho đến khi có ngắt EXTI ────
+  HAL_ResumeTick();
+}
+
+void WakeupFromSleep(void) {
+  // 1. Khôi phục xung nhịp hệ thống (STOP mode tắt HSE/PLL)
+  SystemClock_Config();
+
+  // 2. Tắt ngắt EXTI trên PA10, xóa pending bit, khôi phục UART1
+  HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
+  __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_10);  // Xóa EXTI pending bit
+  HAL_GPIO_DeInit(GPIOA, GPIO_PIN_10);    // DeInit PA10 khỏi mode EXTI
+  MX_USART1_UART_Init();                  // Reinit UART1 (PA9 TX + PA10 RX)
+  HAL_Delay(10);                          // Chờ UART ổn định
+  HAL_UART_Receive_IT(&huart1, &uartRxByte, 1);
+
+  // 3. Bật lại màn hình OLED
+  ssd1306_SetDisplayOn(&hi2c1, 1);  // Display ON
+
+  // 4. Reset trạng thái
+  isSleeping = 0;
+  lastActionTime = HAL_GetTick();
+  sysState = STATE_MENU;
+  pinIndex = 0;
+  otpIndex = 0;
+  memset(pinBuffer, 0, sizeof(pinBuffer));
+  memset(otpBuffer, 0, sizeof(otpBuffer));
+
+  // Reset UART buffers để đảm bảo không dính rác lúc thức dậy
+  uartRxIndex = 0;
+  uartCmdReady = 0;
+  memset(uartRxBuffer, 0, sizeof(uartRxBuffer));
+  memset(uartProcessBuffer, 0, sizeof(uartProcessBuffer));
+
+  // 5. Hiển thị Menu
+  OLED_ShowMenu();
+
+  // 6. Gửi ACK:WAKEUP cho ESP32
+  UART_SendString("ACK:WAKEUP\n");
+
+  // 7. Nếu thức dậy do ESP32 (UART), chờ lệnh gửi lại và xử lý ngay
+  if (wakeupSource == 2) {
+    OLED_ShowText("== DANG XU LY ==", "Lenh tu xa...", "");
+    uint32_t waitStart = HAL_GetTick();
+    while (HAL_GetTick() - waitStart < 2000) {  // Chờ tối đa 2 giây
+      // Khôi phục UART RX nếu bị lỗi
+      if (huart1.RxState == HAL_UART_STATE_READY) {
+        HAL_UART_Receive_IT(&huart1, &uartRxByte, 1);
+      }
+      if (uartCmdReady) {
+        ProcessUARTCommand();
+        break;  // Đã nhận và xử lý lệnh → thoát vòng chờ
+      }
+      HAL_Delay(10);
+    }
+  }
+}
+
+// ══════════════════════════════════════
+//  EXTI CALLBACK (Cảm biến chạm + UART wakeup)
+// ══════════════════════════════════════
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+  if (GPIO_Pin == touch_Pin) {
+    // Cảm biến chạm PA7 kích hoạt
+    wakeupSource = 1;
+    lastActionTime = HAL_GetTick();
+  }
+  else if (GPIO_Pin == GPIO_PIN_10) {
+    // PA10 (UART1 RX) - ESP32 gửi dữ liệu → đánh thức
+    wakeupSource = 2;
+    lastActionTime = HAL_GetTick();
+  }
+}
 
 /* USER CODE END 4 */
 

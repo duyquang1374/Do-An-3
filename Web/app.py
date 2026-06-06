@@ -1,5 +1,3 @@
-#update 3/6
-
 from flask import Flask, request, jsonify, send_from_directory, Response
 import json, time, os, threading, queue, random
 import paho.mqtt.client as mqtt_client
@@ -600,6 +598,62 @@ def unlock_door2():
               "time": time.strftime("%Y-%m-%d %H:%M:%S"), "timestamp": time.time()})
     return jsonify({"status": "success", "message": "Đã mở két khẩn cấp", "mqtt_sent": sent})
 
+# ──────────────────────────────────────────
+#  REMOTE UNLOCK (Xác thực khuôn mặt từ xa)
+# ──────────────────────────────────────────
+@app.route("/remote/unlock", methods=["POST"])
+def remote_unlock():
+    """Mở két từ xa: nhận ảnh khuôn mặt → AI nhận dạng → nếu đúng → MQTT mở két."""
+    try:
+        data    = request.json or {}
+        b64_img = data.get("image", "")
+        if not b64_img:
+            return jsonify({"status": "denied", "reason": "Không có ảnh"}), 400
+
+        # AI nhận dạng
+        result = recognition_engine.identify_face_from_b64(b64_img)
+        user   = result["name"]
+        status = result["status"]
+
+        # Ghi log
+        log_data = {
+            "user": user, "status": status, "type": "remote_unlock",
+            "confidence": result.get("confidence", 0),
+            "time": time.strftime("%Y-%m-%d %H:%M:%S"), "timestamp": time.time()
+        }
+        threading.Thread(target=save_log, args=(log_data,), daemon=True).start()
+
+        if status == "granted":
+            # Cập nhật access count
+            db = load_db()
+            if user in db:
+                db[user]["access_count"] = db[user].get("access_count", 0) + 1
+                db[user]["last_access"]  = time.strftime("%Y-%m-%d %H:%M:%S")
+                save_db(db)
+
+            # Gửi MQTT mở két
+            mqtt_publish_command("unlock_door2", user)
+            print(f"[REMOTE] ✅ Két mở từ xa bởi: {user} ({result.get('confidence', 0)}%)")
+
+            sse_push("vault_update", {
+                "open": True, "member": user,
+                "start_time": time.strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+            return jsonify({
+                "status": "granted", "name": user,
+                "confidence": result.get("confidence", 0),
+                "reason": f"Xác thực thành công: {user}"
+            })
+        else:
+            print(f"[REMOTE] ❌ Từ chối: {result.get('reason', 'Unknown')}")
+            return jsonify({
+                "status": "denied", "name": user,
+                "reason": result.get("reason", "Không nhận diện được")
+            })
+    except Exception as e:
+        print(f"[REMOTE] Lỗi: {e}")
+        return jsonify({"status": "denied", "reason": str(e)}), 500
 # ──────────────────────────────────────────
 #  FINGERPRINT ENROLLMENT
 # ──────────────────────────────────────────

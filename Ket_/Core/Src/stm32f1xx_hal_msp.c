@@ -213,7 +213,8 @@ void HAL_UART_MspInit(UART_HandleTypeDef* huart)
     HAL_NVIC_SetPriority(USART3_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(USART3_IRQn);
     /* USER CODE BEGIN USART3_MspInit 1 */
-
+    // AS608 dùng polling mode → tắt ngắt UART3 để tránh xung đột
+    HAL_NVIC_DisableIRQ(USART3_IRQn);
     /* USER CODE END USART3_MspInit 1 */
   }
 

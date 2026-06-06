@@ -221,3 +221,14 @@ void ssd1306_SetCursor(uint8_t x, uint8_t y)
     SSD1306.CurrentX = x;
     SSD1306.CurrentY = y;
 }
+
+//
+//  Turn display ON or OFF (for power saving)
+//  on = 1: Display ON (0xAF)
+//  on = 0: Display OFF (0xAE)
+//
+void ssd1306_SetDisplayOn(I2C_HandleTypeDef *hi2c, uint8_t on)
+{
+    uint8_t cmd = on ? 0xAF : 0xAE;
+    HAL_I2C_Mem_Write(hi2c, SSD1306_I2C_ADDR, 0x00, 1, &cmd, 1, 10);
+}

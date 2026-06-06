@@ -48,6 +48,7 @@ PubSubClient mqttClient(wifiClient);
 #define STM32_TX 17 // ESP32 TX → STM32 RX (PA10)
 
 String stm32Buffer = "";
+String lastCommand = "";  // Lưu lệnh cuối cùng để gửi lại khi STM32 thức dậy
 
 // ══════════════════════════════════════
 //  HEARTBEAT
@@ -194,10 +195,19 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
 
   if (strcmp(action, "unlock_door2") == 0) {
     // Mở két — Gửi tên người qua UART đến STM32
+    // Gửi 3 lần: Lần 1 đánh thức STM32 (nếu đang ngủ),
+    // Lần 2-3 đảm bảo lệnh đến được sau khi UART khôi phục
     String cmd = "UNLOCK:" + String(user) + "\n";
-    STM32_SERIAL.print(cmd);
-    Serial.print("[UART→STM32] ");
-    Serial.print(cmd);
+    lastCommand = cmd;
+
+    for (int i = 0; i < 3; i++) {
+      STM32_SERIAL.print(cmd);
+      Serial.print("[UART→STM32] Lần ");
+      Serial.print(i + 1);
+      Serial.print(": ");
+      Serial.print(cmd);
+      if (i < 2) delay(500);  // Chờ 500ms giữa mỗi lần
+    }
 
     // Publish trạng thái
     publishStatus("unlocked", user);
@@ -277,9 +287,20 @@ void processSTM32Message(String msg) {
     Serial.println("[Gateway] STM32 Bypass Lớp 2 -> Đã mở khóa");
     publishStatus("unlocked", "PIN_Bypass_L2");
 
-  } else if (msg.startsWith("ACK:")) {
+  } else if (msg.indexOf("ACK:") >= 0) {
+    int ackIdx = msg.indexOf("ACK:");
+    String ackType = msg.substring(ackIdx + 4);
     Serial.print("[Gateway] STM32 ACK: ");
-    Serial.println(msg.substring(4));
+    Serial.println(ackType);
+
+    // STM32 vừa thức dậy → gửi lại lệnh cuối cùng
+    if (ackType == "WAKEUP" && lastCommand.length() > 0) {
+      Serial.print("[Gateway] Gửi lại lệnh sau wakeup: ");
+      Serial.print(lastCommand);
+      delay(200);  // Chờ STM32 khởi tạo xong UART và bắt đầu chờ lệnh
+      STM32_SERIAL.print(lastCommand);
+      lastCommand = "";  // Xóa sau khi gửi
+    }
 
   } else if (msg.startsWith("OTP:")) {
     // Người dùng nhập OTP trên két → gửi lên server xác minh
