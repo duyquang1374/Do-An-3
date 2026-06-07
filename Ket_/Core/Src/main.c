@@ -175,7 +175,7 @@ void OLED_ShowPinEntry(void) {
   }
   masked[pinIndex] = '\0';
 
-  char line2[20];
+  char line2[24];
   snprintf(line2, sizeof(line2), "PIN: %s", masked);
 
   char line3[24];
@@ -432,6 +432,15 @@ int main(void)
         // === CPU thức dậy tại đây sau khi có ngắt ===
         WakeupFromSleep();
         continue;
+      }
+    }
+
+    // ══════════════════════════════════════
+    //  TỰ ĐỘNG TẮT CÒI (SAU 5 GIÂY)
+    // ══════════════════════════════════════
+    if (HAL_GPIO_ReadPin(BUZZER_GPIO_Port, BUZZER_Pin) == GPIO_PIN_SET) {
+      if (HAL_GetTick() - lastActionTime > 5000) {
+        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
       }
     }
 
@@ -940,6 +949,9 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(relay_GPIO_Port, relay_Pin, GPIO_PIN_RESET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : relay_Pin */
   GPIO_InitStruct.Pin = relay_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -967,7 +979,23 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(button_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : SW420_Pin */
+  GPIO_InitStruct.Pin = SW420_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(SW420_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : BUZZER_Pin */
+  GPIO_InitStruct.Pin = BUZZER_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(BUZZER_GPIO_Port, &GPIO_InitStruct);
+
   /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
@@ -1086,7 +1114,7 @@ void WakeupFromSleep(void) {
 }
 
 // ══════════════════════════════════════
-//  EXTI CALLBACK (Cảm biến chạm + UART wakeup)
+//  EXTI CALLBACK (Cảm biến chạm + UART wakeup + RUNG)
 // ══════════════════════════════════════
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
   if (GPIO_Pin == touch_Pin) {
@@ -1097,6 +1125,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
   else if (GPIO_Pin == GPIO_PIN_10) {
     // PA10 (UART1 RX) - ESP32 gửi dữ liệu → đánh thức
     wakeupSource = 2;
+    lastActionTime = HAL_GetTick();
+  }
+  else if (GPIO_Pin == SW420_Pin) {
+    // Cảm biến rung kích hoạt
+    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+    UART_SendString("WARNING:VIBRATION\n");
+    wakeupSource = 3;
     lastActionTime = HAL_GetTick();
   }
 }

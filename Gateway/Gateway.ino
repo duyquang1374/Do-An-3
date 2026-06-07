@@ -282,6 +282,11 @@ void processSTM32Message(String msg) {
     Serial.println("[Gateway] STM32 tạm khóa 5s");
     publishStatus("temp_lock_pin", "stm32");
 
+  } else if (msg == "WARNING:VIBRATION") {
+    // Cảnh báo rung động từ STM32
+    Serial.println("[Gateway] CẢNH BÁO: Phát hiện rung két sắt!");
+    publishStatus("intrusion", "sw420");
+
   } else if (msg == "UNLOCK_BYPASS") {
     // STM32 bypass Lớp 2 và đã tự mở khóa
     Serial.println("[Gateway] STM32 Bypass Lớp 2 -> Đã mở khóa");

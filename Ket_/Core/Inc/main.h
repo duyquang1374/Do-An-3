@@ -78,6 +78,11 @@ void Error_Handler(void);
 #define touch_EXTI_IRQn EXTI9_5_IRQn
 #define button_Pin GPIO_PIN_0
 #define button_GPIO_Port GPIOB
+#define SW420_Pin GPIO_PIN_1
+#define SW420_GPIO_Port GPIOB
+#define SW420_EXTI_IRQn EXTI1_IRQn
+#define BUZZER_Pin GPIO_PIN_12
+#define BUZZER_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

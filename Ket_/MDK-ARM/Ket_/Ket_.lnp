@@ -1,0 +1,27 @@
+--cpu Cortex-M3
+"ket_\startup_stm32f103xb.o"
+"ket_\main.o"
+"ket_\stm32f1xx_it.o"
+"ket_\stm32f1xx_hal_msp.o"
+"ket_\as608.o"
+"ket_\fonts.o"
+"ket_\keypad_3x4_quang.o"
+"ket_\ssd1306.o"
+"ket_\stm32f1xx_hal_gpio_ex.o"
+"ket_\stm32f1xx_hal_i2c.o"
+"ket_\stm32f1xx_hal.o"
+"ket_\stm32f1xx_hal_rcc.o"
+"ket_\stm32f1xx_hal_rcc_ex.o"
+"ket_\stm32f1xx_hal_gpio.o"
+"ket_\stm32f1xx_hal_dma.o"
+"ket_\stm32f1xx_hal_cortex.o"
+"ket_\stm32f1xx_hal_pwr.o"
+"ket_\stm32f1xx_hal_flash.o"
+"ket_\stm32f1xx_hal_flash_ex.o"
+"ket_\stm32f1xx_hal_exti.o"
+"ket_\stm32f1xx_hal_uart.o"
+"ket_\system_stm32f1xx.o"
+--strict --scatter "Ket_\Ket_.sct"
+--summary_stderr --info summarysizes --map --load_addr_map_info --xref --callgraph --symbols
+--info sizes --info totals --info unused --info veneers
+--list "Ket_.map" -o Ket_\Ket_.axf
