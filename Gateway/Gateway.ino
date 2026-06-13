@@ -21,6 +21,17 @@
 #include <WiFi.h>
 
 // ══════════════════════════════════════
+//  BATTERY MONITORING (ADC on GPIO34)
+// ══════════════════════════════════════
+#define BATTERY_ADC_PIN     34        // GPIO34 (ADC1_CH6) — input-only, safe with WiFi
+#define DIVIDER_RATIO       0.20f     // R2/(R1+R2) = 5k/(20k+5k) -> BẮT BUỘC R1=20k (nối 12V), R2=5k (nối mass)
+#define VBAT_MIN            9.0f      // 0% battery (Acquy 12V cạn hoặc 3S LiPo cạn)
+#define VBAT_MAX            12.6f     // 100% battery (Acquy sạc đầy hoặc 3S LiPo đầy)
+#define ADC_VREF            3.3f      // ESP32 ADC reference voltage (11dB attenuation)
+#define ADC_RESOLUTION      4095.0f   // 12-bit ADC
+#define BATTERY_SAMPLES     16        // Multi-sample averaging for stability
+
+// ══════════════════════════════════════
 //  CẤU HÌNH WIFI
 // ══════════════════════════════════════
 const char *WIFI_SSID = "Xoi Banh My Chi Nga"; // ← Thay SSID WiFi
@@ -56,6 +67,41 @@ String lastCommand = "";  // Lưu lệnh cuối cùng để gửi lại khi STM3
 unsigned long lastHeartbeat = 0;
 const unsigned long HEARTBEAT_INTERVAL = 10000; // 10 giây
 
+// ── Battery state ──
+float    lastBatteryVoltage = 0.0;
+int      lastBatteryPercent = -1;    // -1 = chưa đọc
+unsigned long lastBatteryRead = 0;
+const unsigned long BATTERY_READ_INTERVAL = 10000;  // Đọc mỗi 10s
+unsigned long lastBatteryUART = 0;
+const unsigned long BATTERY_UART_INTERVAL = 30000;  // Gửi STM32 mỗi 30s
+
+// ══════════════════════════════════════
+//  SETUP
+// ══════════════════════════════════════
+// ══════════════════════════════════════
+//  BATTERY FUNCTIONS
+// ══════════════════════════════════════
+float readBatteryVoltage() {
+  // Đọc nhiều mẫu rồi lấy trung bình để giảm nhiễu
+  uint32_t sum = 0;
+  for (int i = 0; i < BATTERY_SAMPLES; i++) {
+    sum += analogRead(BATTERY_ADC_PIN);
+    delayMicroseconds(100);
+  }
+  float adcAvg = (float)sum / BATTERY_SAMPLES;
+  // Chuyển ADC → điện áp tại chân GPIO (0–3.3V)
+  float vPin = (adcAvg / ADC_RESOLUTION) * ADC_VREF;
+  // Điện áp thực tế pin = vPin / DIVIDER_RATIO
+  float vBat = vPin / DIVIDER_RATIO;
+  return vBat;
+}
+
+int batteryVoltageToPercent(float v) {
+  if (v >= VBAT_MAX) return 100;
+  if (v <= VBAT_MIN) return 0;
+  return (int)((v - VBAT_MIN) / (VBAT_MAX - VBAT_MIN) * 100.0f);
+}
+
 // ══════════════════════════════════════
 //  SETUP
 // ══════════════════════════════════════
@@ -66,6 +112,16 @@ void setup() {
   // UART → STM32
   STM32_SERIAL.begin(STM32_BAUD, SERIAL_8N1, STM32_RX, STM32_TX);
   Serial.println("[UART] Kết nối STM32 @ 115200 baud");
+
+  // Battery ADC
+  analogSetAttenuation(ADC_11db);  // Range 0–3.3V
+  pinMode(BATTERY_ADC_PIN, INPUT);
+  Serial.println("[BATTERY] ADC GPIO34 initialized");
+
+  // Đọc pin lần đầu
+  lastBatteryVoltage = readBatteryVoltage();
+  lastBatteryPercent = batteryVoltageToPercent(lastBatteryVoltage);
+  Serial.printf("[BATTERY] Initial: %.2fV → %d%%\n", lastBatteryVoltage, lastBatteryPercent);
 
   // MQTT topics
   TOPIC_COMMAND = String(MQTT_PREFIX) + "/command";
@@ -108,6 +164,23 @@ void loop() {
     } else {
       stm32Buffer += c;
     }
+  }
+
+  // ── Battery ADC ──
+  if (millis() - lastBatteryRead >= BATTERY_READ_INTERVAL) {
+    lastBatteryRead = millis();
+    lastBatteryVoltage = readBatteryVoltage();
+    lastBatteryPercent = batteryVoltageToPercent(lastBatteryVoltage);
+    Serial.printf("[BATTERY] %.2fV → %d%%\n", lastBatteryVoltage, lastBatteryPercent);
+  }
+
+  // ── Gửi battery xuống STM32 qua UART (mỗi 30s) ──
+  if (millis() - lastBatteryUART >= BATTERY_UART_INTERVAL) {
+    lastBatteryUART = millis();
+    String cmd = "BATTERY:" + String(lastBatteryPercent) + "\n";
+    STM32_SERIAL.print(cmd);
+    Serial.print("[UART→STM32] ");
+    Serial.print(cmd);
   }
 
   // ── Heartbeat ──
@@ -358,12 +431,14 @@ void publishStatus(const char *event, const char *trigger) {
 }
 
 void publishHeartbeat() {
-  StaticJsonDocument<128> doc;
+  StaticJsonDocument<256> doc;
   doc["status"] = "alive";
   doc["uptime"] = millis() / 1000;
   doc["wifi_rssi"] = WiFi.RSSI();
+  doc["battery_pct"] = lastBatteryPercent;
+  doc["battery_v"] = round(lastBatteryVoltage * 100.0) / 100.0;  // 2 decimal places
 
-  char buf[128];
+  char buf[256];
   serializeJson(doc, buf);
   mqttClient.publish(TOPIC_HEARTBEAT.c_str(), buf);
 }

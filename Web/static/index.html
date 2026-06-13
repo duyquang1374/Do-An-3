@@ -25,6 +25,17 @@
     </div>
     <div class="topbar-title" id="page-title">SafeVault</div>
     <div class="topbar-actions">
+      <!-- BATTERY WIDGET -->
+      <div class="battery-widget" id="battery-widget" title="Đang tải...">
+        <div class="battery-icon-wrap">
+          <svg class="battery-svg" viewBox="0 0 28 14" width="28" height="14">
+            <rect x="0.5" y="0.5" width="24" height="13" rx="2.5" ry="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+            <rect x="25" y="4" width="2.5" height="6" rx="1" fill="currentColor" opacity="0.5"/>
+            <rect class="battery-fill" id="battery-fill" x="2" y="2" width="20" height="9.5" rx="1.5" fill="var(--green-400)"/>
+          </svg>
+        </div>
+        <span class="battery-pct" id="battery-pct">--%</span>
+      </div>
       <button class="btn-icon" onclick="refreshAll()" title="Làm mới">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="23 4 23 10 17 10"/>

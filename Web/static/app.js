@@ -18,6 +18,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadRecentLogs();
   loadUsers();
   loadLogs();
+  loadBattery();
   startAutoRefresh();
   connectSSE();
 });
@@ -88,6 +89,13 @@ function connectSSE() {
     showToast("info", "✅ Mã PIN chính xác! Vui lòng xác thực khuôn mặt.", 6000);
     updateDoorStatus("door1", "open");
     showFaceAuthPanel();
+  });
+
+  // Battery update từ ESP32 ADC
+  sseSource.addEventListener("battery_update", (e) => {
+    const data = JSON.parse(e.data);
+    console.log("[SSE] Battery:", data);
+    updateBatteryUI(data.percent, data.voltage);
   });
 
   // Kết quả đăng ký vân tay
@@ -366,6 +374,7 @@ function refreshAll() {
   loadRecentLogs();
   loadUsers();
   loadLogs();
+  loadBattery();
   showToast("success", "🔄 Đã làm mới dữ liệu!");
 }
 
@@ -645,6 +654,55 @@ async function apiFetch(url, options = {}) {
     console.error("API Error:", err);
     return null;
   }
+}
+
+// ===== BATTERY =====
+async function loadBattery() {
+  const data = await apiFetch("/battery");
+  if (data && data.percent !== undefined) {
+    updateBatteryUI(data.percent, data.voltage);
+  }
+}
+
+function updateBatteryUI(pct, voltage) {
+  const widget = document.getElementById("battery-widget");
+  const fillEl = document.getElementById("battery-fill");
+  const pctEl  = document.getElementById("battery-pct");
+  if (!widget || !fillEl || !pctEl) return;
+
+  // Clamp value
+  pct = Math.max(0, Math.min(100, pct));
+
+  // Update text
+  pctEl.textContent = pct >= 0 ? pct + "%" : "--%";
+
+  // Update fill width (max width = 20, SVG units)
+  const fillWidth = (pct / 100) * 20;
+  fillEl.setAttribute("width", fillWidth);
+
+  // Color based on level
+  let color, cssClass;
+  if (pct > 50) {
+    color = "var(--green-400)";
+    cssClass = "battery-good";
+  } else if (pct > 20) {
+    color = "var(--orange-400)";
+    cssClass = "battery-warn";
+  } else {
+    color = "var(--red-400)";
+    cssClass = "battery-low";
+  }
+  fillEl.setAttribute("fill", color);
+  pctEl.style.color = color;
+  widget.style.color = color;
+
+  // Toggle low-battery animation
+  widget.classList.remove("battery-good", "battery-warn", "battery-low");
+  widget.classList.add(cssClass);
+
+  // Tooltip with voltage
+  const vStr = voltage ? voltage.toFixed(2) + "V" : "--V";
+  widget.title = `Pin: ${pct}% (${vStr})`;
 }
 
 // ===== STATS =====

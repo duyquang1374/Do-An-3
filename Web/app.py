@@ -25,6 +25,11 @@ esp_online     = False
 mqtt_client_   = None
 mqtt_connected = False
 
+# ── Battery state (từ ESP32 ADC) ──
+battery_percent  = -1      # -1 = chưa nhận được dữ liệu
+battery_voltage  = 0.0
+battery_updated  = 0       # timestamp lần cập nhật cuối
+
 # ── Trạng thái xác thực Layer 2 ──
 waiting_for_face  = False
 face_fail_count   = 0
@@ -69,6 +74,19 @@ def on_message(client, userdata, msg):
 
         if topic == TOPIC_HEARTBEAT:
             esp_online = True
+            # Parse battery data từ heartbeat
+            bat_pct = payload.get("battery_pct", None)
+            bat_v   = payload.get("battery_v", None)
+            if bat_pct is not None:
+                global battery_percent, battery_voltage, battery_updated
+                battery_percent = int(bat_pct)
+                battery_voltage = float(bat_v) if bat_v else 0.0
+                battery_updated = time.time()
+                sse_push("battery_update", {
+                    "percent": battery_percent,
+                    "voltage": round(battery_voltage, 2),
+                    "time": time.strftime("%H:%M:%S")
+                })
 
         elif topic == TOPIC_STATUS:
             event  = payload.get("event", "")
@@ -712,7 +730,19 @@ def events():
 @app.route("/esp/status", methods=["GET"])
 def esp_status():
     return jsonify({"online": esp_online, "mqtt_connected": mqtt_connected,
-                    "mqtt_broker": MQTT_BROKER, "topic_command": TOPIC_COMMAND})
+                    "mqtt_broker": MQTT_BROKER, "topic_command": TOPIC_COMMAND,
+                    "battery_percent": battery_percent,
+                    "battery_voltage": round(battery_voltage, 2)})
+
+@app.route("/battery", methods=["GET"])
+def get_battery():
+    """Trả về thông tin pin hiện tại."""
+    return jsonify({
+        "percent": battery_percent,
+        "voltage": round(battery_voltage, 2),
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(battery_updated)) if battery_updated else None,
+        "status": "charging" if battery_voltage > 4.15 else ("low" if battery_percent < 20 else "normal")
+    })
 
 # ──────────────────────────────────────────
 #  MAIN
