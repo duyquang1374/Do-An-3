@@ -200,6 +200,70 @@ body::after {
   height: 16px;
 }
 
+/* ===== BATTERY WIDGET ===== */
+.battery-widget {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--border-radius-sm);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--green-400);
+  cursor: default;
+  transition: var(--transition);
+  font-family: 'JetBrains Mono', monospace;
+  user-select: none;
+}
+
+.battery-widget:hover {
+  background: var(--glass-hover);
+  border-color: rgba(255,255,255,0.12);
+}
+
+.battery-icon-wrap {
+  display: flex;
+  align-items: center;
+  line-height: 0;
+}
+
+.battery-svg {
+  display: block;
+}
+
+.battery-fill {
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1), fill 0.4s ease;
+}
+
+.battery-pct {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  min-width: 28px;
+  text-align: right;
+  transition: color 0.4s ease;
+}
+
+/* Low battery pulse animation */
+.battery-widget.battery-low {
+  animation: batteryPulse 1.5s ease-in-out infinite;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+@keyframes batteryPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* Warn state subtle glow */
+.battery-widget.battery-warn {
+  border-color: rgba(251, 146, 60, 0.25);
+}
+
+.battery-widget.battery-good {
+  border-color: rgba(74, 222, 128, 0.15);
+}
+
 /* ===== PAGES ===== */
 .page {
   display: none;

@@ -81,6 +81,7 @@ uint8_t pinIndex = 0;          // Vị trí ký tự hiện tại
 uint8_t failCount = 0;         // Số lần nhập sai
 uint32_t lastActionTime = 0;   // Timestamp cho timeout
 uint8_t fingerFailCount = 0;   // Số lần quét vân tay sai
+int8_t batteryPercent = -1;    // % pin từ ESP32 ADC (-1 = chưa có)
 
 // ── Đăng ký vân tay ──
 uint16_t enrollId = 0;         // ID vân tay đang đăng ký
@@ -186,7 +187,13 @@ void OLED_ShowPinEntry(void) {
 
 // ── Hiển thị Menu chính ──
 void OLED_ShowMenu(void) {
-  OLED_ShowText("== SAFEVAULT ==", "1. Nhap mat khau", "2. Nhap ma OTP");
+  char line1[22];
+  if (batteryPercent >= 0) {
+    snprintf(line1, sizeof(line1), "SAFEVAULT    %d%%", batteryPercent);
+  } else {
+    snprintf(line1, sizeof(line1), "== SAFEVAULT ==");
+  }
+  OLED_ShowText(line1, "1. Nhap mat khau", "2. Nhap ma OTP");
 }
 
 // ── Hiển thị OTP đang nhập ──
@@ -301,6 +308,15 @@ void ProcessUARTCommand(void) {
     char msg[24];
     snprintf(msg, sizeof(msg), "Slot ID: %d", enrollId);
     OLED_ShowText("== DANG KY VAN TAY ==", msg, "Dat ngon tay len...");
+
+  } else if (strstr(uartProcessBuffer, "BATTERY:") != NULL) {
+    // Cập nhật % pin từ ESP32 ADC
+    char *batPtr = strstr(uartProcessBuffer, "BATTERY:") + 8;
+    batteryPercent = (int8_t)atoi(batPtr);
+    // Cập nhật OLED nếu đang ở menu
+    if (sysState == STATE_MENU) {
+      OLED_ShowMenu();
+    }
   }
 
   uartCmdReady = 0;
@@ -439,7 +455,7 @@ int main(void)
     //  TỰ ĐỘNG TẮT CÒI (SAU 5 GIÂY)
     // ══════════════════════════════════════
     if (HAL_GPIO_ReadPin(BUZZER_GPIO_Port, BUZZER_Pin) == GPIO_PIN_SET) {
-      if (HAL_GetTick() - lastActionTime > 5000) {
+      if (HAL_GetTick() - lastActionTime > 1000) {
         HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
       }
     }
