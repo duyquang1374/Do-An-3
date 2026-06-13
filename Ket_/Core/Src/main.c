@@ -1128,11 +1128,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     lastActionTime = HAL_GetTick();
   }
   else if (GPIO_Pin == SW420_Pin) {
-    // Cảm biến rung kích hoạt
-    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
-    UART_SendString("WARNING:VIBRATION\n");
-    wakeupSource = 3;
-    lastActionTime = HAL_GetTick();
+    // CHỈ BÁO ĐỘNG NẾU KÉT KHÔNG PHẢI Ở TRẠNG THÁI ĐÃ MỞ (Tức là đang khóa)
+    if (sysState != STATE_VAULT_OPEN) {
+      // Cảm biến rung kích hoạt
+      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+      UART_SendString("WARNING:VIBRATION\n");
+      wakeupSource = 3;
+      lastActionTime = HAL_GetTick();
+    }
   }
 }
 
