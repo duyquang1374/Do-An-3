@@ -1,11 +1,3 @@
-"""
-SafeVault — Recognition Engine (DeepFace Edition)
-================================
-AI module: DeepFace (FaceNet) + Liveness Detection
-Import trong Flask app.py thay vì chạy script riêng.
-
-Tác giả: SafeVault IoT
-"""
 
 import base64
 import json
@@ -33,15 +25,13 @@ BLUR_THRESHOLD          = 20.0
 # ──────────────────────────────────────────
 #  STATE (thread-safe)
 # ──────────────────────────────────────────
-# Dạng: {"Kien": [emb1, emb2, ...], "An": [emb1, ...]}
+
 known_embeddings = {}
 last_db_mtime    = 0.0
 is_trained       = False
 _lock            = threading.Lock()
 
-# ──────────────────────────────────────────
-#  HELPER: Decode base64 → OpenCV image
-# ──────────────────────────────────────────
+
 def _decode_image(b64_str: str):
     """Giải mã chuỗi base64 thành ảnh OpenCV. Trả về None nếu lỗi."""
     try:
@@ -58,10 +48,7 @@ def _decode_image(b64_str: str):
 #  LIVENESS DETECTION (Anti-Spoofing)
 # ──────────────────────────────────────────
 def check_liveness(b64_str: str) -> tuple:
-    """
-    Phát hiện mặt thật vs ảnh giả bằng phân tích độ nét (Laplacian Variance).
-    Returns: (is_real: bool, blur_score: float)
-    """
+
     img = _decode_image(b64_str)
     if img is None:
         return False, 0.0

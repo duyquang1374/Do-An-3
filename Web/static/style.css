@@ -1,42 +1,45 @@
 /* ===================================
-   SAFEVAULT — GOLD & BLACK THEME
+   SAFEVAULT — WHITE & BLUE THEME
    =================================== */
 
 :root {
-  --bg-900: #080808;
-  --bg-800: #0d0d0d;
-  --bg-700: #111111;
-  --bg-600: #161616;
-  --bg-500: #1a1a1a;
+  /* Nền Sáng */
+  --bg-900: #f8fafc;
+  --bg-800: #ffffff;
+  --bg-700: #f1f5f9;
+  --bg-600: #e2e8f0;
+  --bg-500: #cbd5e1;
 
-  --glass-bg: rgba(255, 255, 255, 0.03);
-  --glass-border: rgba(212, 175, 55, 0.12);
-  --glass-hover: rgba(212, 175, 55, 0.06);
-  --glass-card: rgba(212, 175, 55, 0.03);
+  /* Hiệu ứng Glassmorphism trên nền sáng */
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(59, 130, 246, 0.2);
+  --glass-hover: rgba(59, 130, 246, 0.1);
+  --glass-card: rgba(255, 255, 255, 0.9);
 
-  /* Gold replaces purple — all downstream var() calls get gold automatically */
-  --purple-400: #F5D76E;
-  --purple-500: #D4AF37;
-  --purple-600: #9A7D0A;
-  --blue-400:   #D4AF37;
-  --blue-500:   #B8960C;
-  --cyan-400:   #F5D76E;
-  --green-400: #4ade80;
-  --green-500: #22c55e;
-  --red-400: #f87171;
-  --red-500: #ef4444;
-  --orange-400: #fb923c;
-  --yellow-400: #D4AF37;
+  /* Xanh dương chủ đạo (thay cho Gold/Purple cũ) */
+  --purple-400: #60a5fa; 
+  --purple-500: #3b82f6;
+  --purple-600: #2563eb;
+  --blue-400:   #60a5fa;
+  --blue-500:   #3b82f6;
+  --cyan-400:   #38bdf8;
+  --green-400: #10b981;
+  --green-500: #059669;
+  --red-400: #ef4444;
+  --red-500: #dc2626;
+  --orange-400: #f97316;
+  --yellow-400: #f59e0b;
 
-  /* Gold accent shortcuts */
-  --gold:       #D4AF37;
-  --gold-light: #F5D76E;
-  --gold-dark:  #9A7D0A;
-  --gold-dim:   rgba(212, 175, 55, 0.12);
+  /* Accent (Giữ nguyên tên biến gold để không phải đổi mã bên dưới) */
+  --gold:       #3b82f6;
+  --gold-light: #60a5fa;
+  --gold-dark:  #2563eb;
+  --gold-dim:   rgba(59, 130, 246, 0.12);
 
-  --text-primary: #f0ead6;
-  --text-secondary: #a09070;
-  --text-muted: #504030;
+  /* Chữ tối màu trên nền sáng */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
 
   --sidebar-width: 240px;
   --topbar-height: 60px;
@@ -68,8 +71,8 @@ body::before {
   position: fixed;
   inset: 0;
   background-image: 
-    linear-gradient(rgba(212, 175, 55, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(212, 175, 55, 0.04) 1px, transparent 1px);
+    linear-gradient(rgba(59, 130, 246, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 130, 246, 0.06) 1px, transparent 1px);
   background-size: 40px 40px;
   pointer-events: none;
   z-index: 0;
@@ -82,7 +85,7 @@ body::after {
   width: 600px;
   height: 600px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(212, 175, 55, 0.06) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.06) 0%, transparent 70%);
   top: -200px;
   left: 100px;
   pointer-events: none;
@@ -529,6 +532,18 @@ body::after {
   border: 1px solid rgba(251, 146, 60, 0.2);
 }
 
+.badge-warning {
+  background: rgba(250, 204, 21, 0.12);
+  color: #facc15;
+  border: 1px solid rgba(250, 204, 21, 0.2);
+}
+
+.badge-info {
+  background: rgba(96, 165, 250, 0.12);
+  color: var(--blue-400);
+  border: 1px solid rgba(96, 165, 250, 0.2);
+}
+
 /* ===== REGISTER PAGE ===== */
 .register-layout {
   display: grid;
@@ -667,12 +682,12 @@ body::after {
   align-items: center;
   gap: 8px;
   font-family: 'Inter', sans-serif;
-  box-shadow: 0 0 20px rgba(212, 175, 55, 0.3);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
 }
 
 .btn-capture:hover {
   transform: scale(1.04);
-  box-shadow: 0 0 30px rgba(212, 175, 55, 0.5);
+  box-shadow: 0 0 30px rgba(59, 130, 246, 0.5);
 }
 
 .capture-icon { font-size: 18px; }
@@ -2039,7 +2054,7 @@ body::after {
 
 .bottom-nav .nav-item.active svg {
   transform: translateY(-2px);
-  filter: drop-shadow(0 4px 6px rgba(212, 175, 55, 0.4));
+  filter: drop-shadow(0 4px 6px rgba(59, 130, 246, 0.4));
 }
 
 .bottom-nav .nav-badge {
@@ -2083,7 +2098,7 @@ body::after {
   width: 48px;
   height: 48px;
   border-radius: 12px;
-  background: rgba(212, 175, 55, 0.15);
+  background: rgba(59, 130, 246, 0.15);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2133,13 +2148,13 @@ body::after {
 }
 
 .btn-emergency-door2 {
-  background: rgba(212, 175, 55, 0.1);
+  background: rgba(59, 130, 246, 0.1);
   color: var(--gold);
-  border-color: rgba(212, 175, 55, 0.3);
+  border-color: rgba(59, 130, 246, 0.3);
 }
 
 .btn-emergency-door2:hover {
-  background: rgba(212, 175, 55, 0.2);
+  background: rgba(59, 130, 246, 0.2);
 }
 
 /* Kế thừa app container fixed nav */
@@ -2161,7 +2176,7 @@ body::after {
 
 #face-auth-btn:hover {
   transform: scale(1.02);
-  box-shadow: 0 6px 30px rgba(212, 175, 55, 0.5);
+  box-shadow: 0 6px 30px rgba(59, 130, 246, 0.5);
 }
 
 #face-auth-btn:active {

@@ -83,6 +83,20 @@ function connectSSE() {
     loadLogs(); loadStats();
   });
 
+  // Cảnh báo bảo mật (sai PIN, sai vân tay, cửa mở quá lâu)
+  sseSource.addEventListener("security_alert", (e) => {
+    const data = JSON.parse(e.data);
+    console.log("[SSE] Security alert!", data);
+    if (data.type === "pin_fail") {
+      showToast("error", `🔒 <b>Nhập sai mật khẩu 3 lần!</b><br>Két tạm khóa. Thời gian: ${data.time}`, 10000);
+    } else if (data.type === "finger_fail") {
+      showToast("error", `🔒 <b>Quét sai vân tay 3 lần!</b><br>Két tạm khóa. Thời gian: ${data.time}`, 10000);
+    } else if (data.type === "door_open_long") {
+      showToast("warning", `🚨 <b>Cửa két mở quá lâu!</b><br>Vui lòng đóng cửa két. Thời gian: ${data.time}`, 15000);
+    }
+    loadLogs(); loadStats();
+  });
+
   // Yêu cầu quét mặt từ STM32 (PIN đúng)
   sseSource.addEventListener("face_request", (e) => {
     console.log("[SSE] PIN OK → Yêu cầu Face ID!");
@@ -139,7 +153,6 @@ function connectSSE() {
 
 // ===== FINGERPRINT ENROLLMENT =====
 async function startFingerprintEnroll() {
-  const fpId = document.getElementById("fp-id").value;
   const label = document.getElementById("fp-label").value || "Unknown";
   const btn = document.getElementById("fp-enroll-btn");
   const statusEl = document.getElementById("fp-status");
@@ -147,23 +160,18 @@ async function startFingerprintEnroll() {
   const textEl = document.getElementById("fp-status-text");
   const subEl = document.getElementById("fp-status-sub");
 
-  if (fpId === "" || fpId === null) {
-    showToast("warning", "Vui lòng nhập ID vân tay (0-126)");
-    return;
-  }
-
   btn.disabled = true;
   if (statusEl) statusEl.style.display = "block";
   if (iconEl) iconEl.textContent = "⏳";
   if (textEl) textEl.textContent = "Đang gửi lệnh...";
   if (subEl) subEl.textContent = "Vui lòng đặt ngón tay lên cảm biến trên két sắt.";
-  if (statusEl) { statusEl.style.background = "rgba(212,175,55,0.08)"; statusEl.style.borderColor = "rgba(212,175,55,0.2)"; }
+  if (statusEl) { statusEl.style.background = "rgba(59,130,246,0.08)"; statusEl.style.borderColor = "rgba(59,130,246,0.2)"; }
 
   try {
     const res = await fetch("/fingerprint/enroll", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ finger_id: parseInt(fpId), label: label })
+      body: JSON.stringify({ label: label })
     });
     const data = await res.json();
 
@@ -717,7 +725,7 @@ async function loadStats() {
 
   // Update badges
   document.getElementById("users-badge").textContent = data.total_users || 0;
-  document.getElementById("logs-badge").textContent = data.total_access || 0;
+  document.getElementById("logs-badge").textContent = data.granted || 0;
 
   // Update server status
   document.getElementById("server-status-dot").className = "status-indicator online";
@@ -755,9 +763,9 @@ async function loadRecentLogs() {
   if (!data) return;
 
   const container = document.getElementById("recent-logs");
-  // Chỉ lấy log access phòng mổ (type = access, granted)
+  // Chỉ lấy log mở két thành công (không phân biệt phương thức)
   const recent = data
-    .filter(l => l.type === "access" && l.status === "granted")
+    .filter(l => l.status === "granted")
     .slice(0, 6);
 
   if (recent.length === 0) {
@@ -776,7 +784,7 @@ function createRecentLogHTML(log) {
   const initial = (log.user || "?")[0].toUpperCase();
   return `
     <div class="recent-log-item">
-      <div class="log-avatar" style="background:linear-gradient(135deg,#D4AF37,#9A7D0A)">${initial}</div>
+      <div class="log-avatar" style="background:linear-gradient(135deg,#3b82f6,#2563eb)">${initial}</div>
       <div class="log-info">
         <div class="log-name">🔑 ${escapeHtml(log.user || "Unknown")}</div>
         <div class="log-time">${formatTime(log.time)}</div>
@@ -973,31 +981,62 @@ function applyLogFilter() {
 function renderLogsTable(logs) {
   const tbody = document.getElementById("logs-tbody");
 
-  const filtered = logs.filter(l => l.type === "access");
-
-  if (filtered.length === 0) {
+  // Hiển thị tất cả các loại log (không filter cứng type)
+  if (logs.length === 0) {
     tbody.innerHTML = `
       <tr><td colspan="4">
         <div class="empty-state">
           <div class="empty-icon">🔐</div>
-          <p>Chưa có dữ liệu mở két</p>
+          <p>Chưa có dữ liệu lịch sử</p>
         </div>
       </td></tr>`;
     return;
   }
 
-  tbody.innerHTML = filtered.map((log, i) => {
-    const badgeClass = log.status === "granted" ? "badge-granted" : "badge-denied";
-    const badgeText  = log.status === "granted" ? "✓ Vào" : "✗ Từ chối";
+  tbody.innerHTML = logs.map((log, i) => {
+    let badgeClass, badgeText;
+    if (log.status === "granted") {
+      badgeClass = "badge-granted"; badgeText = "✓ Mở";
+    } else if (log.status === "denied") {
+      badgeClass = "badge-denied"; badgeText = "✗ Từ chối";
+    } else if (log.status === "warning") {
+      badgeClass = "badge-warning"; badgeText = "⚠ Cảnh báo";
+    } else if (log.status === "intrusion") {
+      badgeClass = "badge-denied"; badgeText = "🚨 Xâm nhập";
+    } else if (log.status === "locked") {
+      badgeClass = "badge-info"; badgeText = "🔒 Khóa";
+    } else if (log.status === "enrolled" || log.status === "registered") {
+      badgeClass = "badge-granted"; badgeText = "➕ Đăng ký";
+    } else if (log.status === "otp_created") {
+      badgeClass = "badge-info"; badgeText = "🔑 Tạo OTP";
+    } else {
+      badgeClass = "badge-info"; badgeText = log.status || "?";
+    }
+
     const initial = (log.user || "?")[0].toUpperCase();
+    let logText = "";
+    if (log.detail && log.detail.includes("mở khóa bằng")) {
+      // Ví dụ: Quang mở khóa bằng vân tay
+      logText = `<b>${escapeHtml(log.user || "Người dùng")}</b> ${escapeHtml(log.detail)}`;
+      // Thay thế phương thức bằng chữ đậm
+      if (log.method) {
+        logText = logText.replace(escapeHtml(log.method), `<b>${escapeHtml(log.method)}</b>`);
+      }
+    } else {
+      // Các log khác
+      logText = `<b>${escapeHtml(log.user || "Unknown")}</b>`;
+      if (log.detail) {
+        logText += `<br><small style="opacity:0.7">${escapeHtml(log.detail)}</small>`;
+      }
+    }
 
     return `
       <tr class="row-enter">
         <td class="log-num">${i + 1}</td>
         <td>
           <div class="log-user-cell">
-            <div class="icon" style="background:linear-gradient(135deg,#D4AF37,#9A7D0A)">${initial}</div>
-            <span>🔑 ${escapeHtml(log.user || "Unknown")}</span>
+            <div class="icon" style="background:var(--primary-gradient, linear-gradient(135deg,#3b82f6,#2563eb))">${initial}</div>
+            <span>🔑 ${logText}</span>
           </div>
         </td>
         <td><span class="badge ${badgeClass}">${badgeText}</span></td>

@@ -60,6 +60,7 @@ PubSubClient mqttClient(wifiClient);
 
 String stm32Buffer = "";
 String lastCommand = "";  // Lưu lệnh cuối cùng để gửi lại khi STM32 thức dậy
+bool stm32IsAwake = true; // Theo dõi trạng thái ngủ của STM32
 
 // ══════════════════════════════════════
 //  HEARTBEAT
@@ -175,7 +176,8 @@ void loop() {
   }
 
   // ── Gửi battery xuống STM32 qua UART (mỗi 30s) ──
-  if (millis() - lastBatteryUART >= BATTERY_UART_INTERVAL) {
+  // CHỈ GỬI KHI STM32 ĐANG THỨC ĐỂ TRÁNH ĐÁNH THỨC NHẦM
+  if (stm32IsAwake && millis() - lastBatteryUART >= BATTERY_UART_INTERVAL) {
     lastBatteryUART = millis();
     String cmd = "BATTERY:" + String(lastBatteryPercent) + "\n";
     STM32_SERIAL.print(cmd);
@@ -302,9 +304,10 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
     Serial.println("[UART→STM32] TEMP_LOCK");
 
   } else if (strcmp(action, "unlock") == 0) {
-    STM32_SERIAL.print("UNLOCK:Emergency\n");
-    Serial.println("[UART→STM32] UNLOCK:Emergency");
-    publishStatus("unlocked", "Emergency");
+    String cmd = "UNLOCK:" + String(user) + "\n";
+    STM32_SERIAL.print(cmd);
+    Serial.println("[UART→STM32] " + cmd);
+    publishStatus("unlocked", user);
 
   } else if (strcmp(action, "set_otp") == 0) {
     // Server gửi mã OTP xuống cho STM32 lưu (không bắt buộc)
@@ -365,6 +368,15 @@ void processSTM32Message(String msg) {
     Serial.println("[Gateway] STM32 Bypass Lớp 2 -> Đã mở khóa");
     publishStatus("unlocked", "PIN_Bypass_L2");
 
+  } else if (msg == "DOOR_OPEN_LONG") {
+    // Cửa két mở quá lâu (>90s)
+    Serial.println("[Gateway] ⚠️ CẢNH BÁO: Cửa két mở quá lâu!");
+    publishStatus("door_open_long", "stm32");
+
+  } else if (msg == "SLEEPING") {
+    stm32IsAwake = false;
+    Serial.println("[Gateway] STM32 đã vào chế độ ngủ.");
+
   } else if (msg.indexOf("ACK:") >= 0) {
     int ackIdx = msg.indexOf("ACK:");
     String ackType = msg.substring(ackIdx + 4);
@@ -372,12 +384,24 @@ void processSTM32Message(String msg) {
     Serial.println(ackType);
 
     // STM32 vừa thức dậy → gửi lại lệnh cuối cùng
-    if (ackType == "WAKEUP" && lastCommand.length() > 0) {
-      Serial.print("[Gateway] Gửi lại lệnh sau wakeup: ");
-      Serial.print(lastCommand);
-      delay(200);  // Chờ STM32 khởi tạo xong UART và bắt đầu chờ lệnh
-      STM32_SERIAL.print(lastCommand);
-      lastCommand = "";  // Xóa sau khi gửi
+    if (ackType == "WAKEUP") {
+      stm32IsAwake = true; // Đánh dấu đã thức
+      
+      // Gửi ngay thông tin pin mới nhất để STM32 cập nhật OLED
+      String batCmd = "BATTERY:" + String(lastBatteryPercent) + "\n";
+      STM32_SERIAL.print(batCmd);
+      delay(50); // Tránh ghi đè buffer quá nhanh
+      
+      if (lastCommand.length() > 0) {
+        Serial.print("[Gateway] Gửi lại lệnh sau wakeup: ");
+        Serial.print(lastCommand);
+        delay(200);  // Chờ STM32 xử lý xong BATTERY
+        STM32_SERIAL.print(lastCommand);
+        lastCommand = "";  // Xóa sau khi gửi
+      }
+    } else if (ackType == "LOCKED") {
+      Serial.println("[Gateway] Két đã khóa!");
+      publishStatus("locked", "stm32");
     }
 
   } else if (msg.startsWith("OTP:")) {

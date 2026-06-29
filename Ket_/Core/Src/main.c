@@ -1,33 +1,34 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "as608.h"
 #include "fonts.h"
 #include "keypad_3x4_quang.h"
 #include "ssd1306.h"
-#include "as608.h"
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
+
 
 /* USER CODE END Includes */
 
@@ -59,21 +60,21 @@ UART_HandleTypeDef huart3;
 /* USER CODE BEGIN PV */
 // ── Trạng thái hệ thống ──
 typedef enum {
-  STATE_MENU,           // Menu chọn chế độ
-  STATE_INPUT_PIN,      // Đang nhập mật khẩu
-  STATE_INPUT_OTP,      // Đang nhập mã OTP
-  STATE_WAIT_FINGER,    // Chờ quét vân tay (Lớp 2 tại chỗ)
-  STATE_WAIT_FACE,      // Chờ xác thực khuôn mặt từ web (mở từ xa)
-  STATE_WAIT_OTP,       // Chờ server xác minh OTP
-  STATE_VAULT_OPEN,     // Két đang mở
-  STATE_LOCKED_TEMP,    // Tạm khóa do nhập sai 3 lần
-  STATE_ENROLL_FINGER,  // Đang đăng ký vân tay mới
+  STATE_MENU,          // Menu chọn chế độ
+  STATE_INPUT_PIN,     // Đang nhập mật khẩu
+  STATE_INPUT_OTP,     // Đang nhập mã OTP
+  STATE_WAIT_FINGER,   // Chờ quét vân tay (Lớp 2 tại chỗ)
+  STATE_WAIT_FACE,     // Chờ xác thực khuôn mặt từ web (mở từ xa)
+  STATE_WAIT_OTP,      // Chờ server xác minh OTP
+  STATE_VAULT_OPEN,    // Két đang mở
+  STATE_LOCKED_TEMP,   // Tạm khóa do nhập sai 3 lần
+  STATE_ENROLL_FINGER, // Đang đăng ký vân tay mới
 } SystemState_t;
 
 SystemState_t sysState = STATE_MENU;
 
 // ── OTP ──
-char otpBuffer[8];             // Buffer nhập OTP
+char otpBuffer[8]; // Buffer nhập OTP
 uint8_t otpIndex = 0;
 
 char pinBuffer[MAX_INPUT + 1]; // Lưu mã PIN đang nhập
@@ -83,35 +84,48 @@ uint32_t lastActionTime = 0;   // Timestamp cho timeout
 uint8_t fingerFailCount = 0;   // Số lần quét vân tay sai
 int8_t batteryPercent = -1;    // % pin từ ESP32 ADC (-1 = chưa có)
 
+// ── Trạng thái Cửa ──
+uint32_t doorClosedTime = 0;    // Timestamp lúc cửa vừa đóng
+uint8_t lastDoorState = 1;      // Trạng thái cửa trước đó (1 = Mở, 0 = Đóng)
+uint8_t doorOpenWarned = 0;     // Đã cảnh báo cửa mở quá lâu?
+#define DOOR_OPEN_WARN_MS 20000 // 20 giây
+
+// ── Auto-recovery AS608 ──
+uint8_t as608ErrorCount = 0; // Đếm lỗi liên tiếp
+
+// ── Cảnh báo rung (Vibration) ──
+uint8_t vibrationDetected = 0;
+uint32_t vibrationTime = 0;
+
 // ── Đăng ký vân tay ──
-uint16_t enrollId = 0;         // ID vân tay đang đăng ký
-uint8_t enrollStep = 0;        // Bước: 0=chờ lần1, 1=chờ nhấc tay, 2=chờ lần2
+uint16_t enrollId = 0;  // ID vân tay đang đăng ký
+uint8_t enrollStep = 0; // Bước: 0=chờ lần1, 1=chờ nhấc tay, 2=chờ lần2
 
 // ── Cấu hình Layer 2 ──
-uint32_t layer2_enabled = 1;   // Trạng thái bật/tắt (1=Bật, 0=Tắt)
-uint32_t lastPB0Press = 0;     // Debounce cho nút PB0
+uint32_t layer2_enabled = 1; // Trạng thái bật/tắt (1=Bật, 0=Tắt)
+uint32_t lastPB0Press = 0;   // Debounce cho nút PB0
 
 // ── Chế độ ngủ (Sleep / STOP Mode) ──
-#define SLEEP_TIMEOUT_MS  15000  // 15 giây không thao tác → đi ngủ
-volatile uint8_t isSleeping = 0;       // 1 = đang ngủ
-volatile uint8_t wakeupSource = 0;     // 0=none, 1=touch, 2=uart
+#define SLEEP_TIMEOUT_MS 15000     // 15 giây không thao tác → đi ngủ
+volatile uint8_t isSleeping = 0;   // 1 = đang ngủ
+volatile uint8_t wakeupSource = 0; // 0=none, 1=touch, 2=uart
 
-#define FLASH_USER_PAGE_ADDR   ((uint32_t)0x0800FC00) /* Page 63 */
+#define FLASH_USER_PAGE_ADDR ((uint32_t)0x0800FC00) /* Page 63 */
 
 uint32_t Read_Layer2_Status(void) {
-    return *(__IO uint32_t*)FLASH_USER_PAGE_ADDR;
+  return *(__IO uint32_t *)FLASH_USER_PAGE_ADDR;
 }
 
 void Write_Layer2_Status(uint32_t status) {
-    HAL_FLASH_Unlock();
-    FLASH_EraseInitTypeDef EraseInitStruct;
-    uint32_t PageError = 0;
-    EraseInitStruct.TypeErase   = FLASH_TYPEERASE_PAGES;
-    EraseInitStruct.PageAddress = FLASH_USER_PAGE_ADDR;
-    EraseInitStruct.NbPages     = 1;
-    HAL_FLASHEx_Erase(&EraseInitStruct, &PageError);
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_USER_PAGE_ADDR, status);
-    HAL_FLASH_Lock();
+  HAL_FLASH_Unlock();
+  FLASH_EraseInitTypeDef EraseInitStruct;
+  uint32_t PageError = 0;
+  EraseInitStruct.TypeErase = FLASH_TYPEERASE_PAGES;
+  EraseInitStruct.PageAddress = FLASH_USER_PAGE_ADDR;
+  EraseInitStruct.NbPages = 1;
+  HAL_FLASHEx_Erase(&EraseInitStruct, &PageError);
+  HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_USER_PAGE_ADDR, status);
+  HAL_FLASH_Lock();
 }
 
 // ── UART nhận từ ESP32 ──
@@ -143,6 +157,7 @@ void ProcessUARTCommand(void);
 void Relay_Open(void);
 void Relay_Close(void);
 void ResetToMenu(void);
+void Buzzer_Beep(uint8_t count, uint16_t on_ms, uint16_t off_ms);
 void EnterSleepMode(void);
 void WakeupFromSleep(void);
 /* USER CODE END PFP */
@@ -199,7 +214,8 @@ void OLED_ShowMenu(void) {
 // ── Hiển thị OTP đang nhập ──
 void OLED_ShowOTPEntry(void) {
   char masked[8];
-  for (uint8_t i = 0; i < otpIndex; i++) masked[i] = '*';
+  for (uint8_t i = 0; i < otpIndex; i++)
+    masked[i] = '*';
   masked[otpIndex] = '\0';
 
   char line2[20];
@@ -224,13 +240,30 @@ void UART_SendString(const char *str) {
   HAL_UART_Transmit(&huart1, (uint8_t *)str, strlen(str), 200);
 }
 
+// ── Buzzer (PB12) ──
+void Buzzer_Beep(uint8_t count, uint16_t on_ms, uint16_t off_ms) {
+  for (uint8_t i = 0; i < count; i++) {
+    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+    HAL_Delay(on_ms);
+    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+    if (i < count - 1)
+      HAL_Delay(off_ms);
+  }
+}
+
 // ── Điều khiển Relay (PC13) ──
 // Hầu hết module relay phổ biến là Active-LOW:
 //   LOW  (RESET) = Relay BẬT (mở chốt)
 //   HIGH (SET)   = Relay TẮT (đóng chốt)
-void Relay_Open(void) { HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET); }
+void Relay_Open(void) { 
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET); 
+  doorClosedTime = HAL_GetTick(); 
+}
 
-void Relay_Close(void) { HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET); }
+void Relay_Close(void) {
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+  doorClosedTime = HAL_GetTick();
+}
 
 // ── UART Rx Complete callback ──
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
@@ -273,7 +306,7 @@ void ProcessUARTCommand(void) {
 
     char line2[22];
     snprintf(line2, sizeof(line2), "Nguoi: %s", memberName);
-    OLED_ShowText("== KET DANG MO ==", line2, "Trang thai: OPEN");
+    OLED_ShowText("TRANG THAI", "OPEN", "");
     UART_SendString("ACK:UNLOCKED\n");
 
   } else if (strstr(uartProcessBuffer, "TEMP_LOCK") != NULL) {
@@ -285,7 +318,7 @@ void ProcessUARTCommand(void) {
 
   } else if (strstr(uartProcessBuffer, "LOCK") != NULL) {
     Relay_Close();
-    OLED_ShowText("== KET DA KHOA ==", "Trang thai: LOCKED", "");
+    OLED_ShowText("TRANG THAI", "CLOSE", "");
     HAL_Delay(1500);
     ResetToMenu();
     UART_SendString("ACK:LOCKED\n");
@@ -325,11 +358,10 @@ void ProcessUARTCommand(void) {
 /* USER CODE END 0 */
 
 /**
-  * @brief  The application entry point.
-  * @retval int
-  */
-int main(void)
-{
+ * @brief  The application entry point.
+ * @retval int
+ */
+int main(void) {
 
   /* USER CODE BEGIN 1 */
 
@@ -337,7 +369,8 @@ int main(void)
 
   /* MCU Configuration--------------------------------------------------------*/
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick.
+   */
   HAL_Init();
 
   /* USER CODE BEGIN Init */
@@ -440,6 +473,36 @@ int main(void)
     /* USER CODE BEGIN 3 */
 
     // ══════════════════════════════════════
+    //  THEO DÕI TRẠNG THÁI CỬA (CÔNG TẮC HÀNH TRÌNH)
+    // ══════════════════════════════════════
+    uint8_t currentDoorState = HAL_GPIO_ReadPin(CTHT_GPIO_Port, CTHT_Pin);
+    if (currentDoorState == GPIO_PIN_RESET && lastDoorState == GPIO_PIN_SET) {
+      // Cửa vừa mới chuyển từ MỞ sang ĐÓNG
+      // CHỈ cập nhật thời gian nếu đang ở trạng thái mở hợp lệ
+      // Để tránh trường hợp đập phá làm nảy công tắc hành trình gây reset bộ đếm
+      if (sysState == STATE_VAULT_OPEN) {
+        doorClosedTime = HAL_GetTick();
+      }
+    }
+    lastDoorState = currentDoorState;
+
+    // ══════════════════════════════════════
+    //  XỬ LÝ DELAY CẢNH BÁO RUNG (2 GIÂY)
+    // ══════════════════════════════════════
+    if (vibrationDetected) {
+      if (HAL_GetTick() - vibrationTime > 2000) {
+        // Sau 2 giây, nếu cửa VẪN ĐÓNG (CTHT = RESET) và két KHÔNG phải đang mở hợp lệ
+        // thì mới phát cảnh báo (đây là rung lắc do phá hoại, không phải do rơ-le)
+        if (HAL_GPIO_ReadPin(CTHT_GPIO_Port, CTHT_Pin) == GPIO_PIN_RESET && sysState != STATE_VAULT_OPEN) {
+          UART_SendString("WARNING:VIBRATION\n");
+          Buzzer_Beep(15, 100, 100); // Hú 15 tiếng nhanh liên tục
+          lastActionTime = HAL_GetTick();
+        }
+        vibrationDetected = 0; // Đặt lại cờ sau khi xử lý xong
+      }
+    }
+
+    // ══════════════════════════════════════
     //  KIỂM TRA AUTO-SLEEP (15s không thao tác)
     // ══════════════════════════════════════
     if (!isSleeping && sysState == STATE_MENU) {
@@ -451,14 +514,7 @@ int main(void)
       }
     }
 
-    // ══════════════════════════════════════
-    //  TỰ ĐỘNG TẮT CÒI (SAU 5 GIÂY)
-    // ══════════════════════════════════════
-    if (HAL_GPIO_ReadPin(BUZZER_GPIO_Port, BUZZER_Pin) == GPIO_PIN_SET) {
-      if (HAL_GetTick() - lastActionTime > 1000) {
-        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
-      }
-    }
+    // Đã dùng Buzzer_Beep (blocking) nên không cần vòng lặp tự tắt còi nữa
 
     // ══════════════════════════════════════
     //  NÚT BẤM PB0: BẬT/TẮT LAYER 2
@@ -476,15 +532,18 @@ int main(void)
         HAL_Delay(1500);
 
         lastActionTime = HAL_GetTick();
-        if (sysState == STATE_MENU) OLED_ShowMenu();
-        else if (sysState == STATE_INPUT_PIN) OLED_ShowPinEntry();
-        else if (sysState == STATE_INPUT_OTP) OLED_ShowOTPEntry();
+        if (sysState == STATE_MENU)
+          OLED_ShowMenu();
+        else if (sysState == STATE_INPUT_PIN)
+          OLED_ShowPinEntry();
+        else if (sysState == STATE_INPUT_OTP)
+          OLED_ShowOTPEntry();
       }
       lastPB0Press = HAL_GetTick();
     }
 
     // ══════════════════════════════════════
-    //  XỬ LÝ LỆNH UART TỪ ESP32 
+    //  XỬ LÝ LỆNH UART TỪ ESP32
     // ══════════════════════════════════════
     if (uartCmdReady) {
       ProcessUARTCommand();
@@ -510,9 +569,9 @@ int main(void)
         OLED_ShowOTPEntry();
       }
 
-    // ══════════════════════════════════════
-    //  NHẬP MẬT KHẨU (Stealth PIN)
-    // ══════════════════════════════════════
+      // ══════════════════════════════════════
+      //  NHẬP MẬT KHẨU (Stealth PIN)
+      // ══════════════════════════════════════
     } else if (sysState == STATE_INPUT_PIN) {
       // Timeout 10s không nhập gì → về menu
       if (pinIndex > 0 && (HAL_GetTick() - lastActionTime > 10000)) {
@@ -531,11 +590,13 @@ int main(void)
             // Nhấn * khi trống → về menu
             ResetToMenu();
           }
-          if (sysState == STATE_INPUT_PIN) OLED_ShowPinEntry();
+          if (sysState == STATE_INPUT_PIN)
+            OLED_ShowPinEntry();
 
         } else if (key == '#') {
           if (pinIndex == 0) {
-            OLED_ShowText("== NHAP MAT KHAU ==", "Chua nhap PIN!", "Nhap roi nhan #");
+            OLED_ShowText("== NHAP MAT KHAU ==", "Chua nhap PIN!",
+                          "Nhap roi nhan #");
             HAL_Delay(1000);
             OLED_ShowPinEntry();
 
@@ -546,20 +607,22 @@ int main(void)
             memset(pinBuffer, 0, sizeof(pinBuffer));
 
             if (layer2_enabled) {
-                sysState = STATE_WAIT_FINGER;
-                fingerFailCount = 0;
-                lastActionTime = HAL_GetTick();
+              sysState = STATE_WAIT_FINGER;
+              fingerFailCount = 0;
+              lastActionTime = HAL_GetTick();
 
-                OLED_ShowText("== PIN DUNG ==", "Chuyen Layer 2...", "Dat van tay len");
-                HAL_Delay(500);
-                OLED_ShowText("== QUET VAN TAY ==", "Dat ngon tay len", "cam bien...");
+              OLED_ShowText("== PIN DUNG ==", "Chuyen Layer 2...",
+                            "Dat van tay len");
+              HAL_Delay(500);
+              OLED_ShowText("== QUET VAN TAY ==", "Dat ngon tay len",
+                            "cam bien...");
             } else {
-                // 🔓 Bỏ qua Layer 2 (Bypass)
-                OLED_ShowText("== MO KHOA ==", "Lop 2 da tat", "(Bypass L2)");
-                UART_SendString("UNLOCK_BYPASS\n");
-                Relay_Open();
-                sysState = STATE_VAULT_OPEN;
-                lastActionTime = HAL_GetTick();
+              // 🔓 Bỏ qua Layer 2 (Bypass)
+              OLED_ShowText("== MO KHOA ==", "Lop 2 da tat", "(Bypass L2)");
+              UART_SendString("UNLOCK_BYPASS\n");
+              Relay_Open();
+              sysState = STATE_VAULT_OPEN;
+              lastActionTime = HAL_GetTick();
             }
 
           } else {
@@ -570,13 +633,16 @@ int main(void)
 
             if (failCount >= MAX_FAIL) {
               sysState = STATE_LOCKED_TEMP;
-              OLED_ShowText("!! TAM KHOA !!", "Sai 3 lan lien tiep", "Cho 5 giay...");
+              OLED_ShowText("!! TAM KHOA !!", "Sai 3 lan lien tiep",
+                            "Cho 5 giay...");
+              Buzzer_Beep(3, 300, 200);
               UART_SendString("LOCKED_TEMP\n");
               HAL_Delay(LOCK_TIME_MS);
               ResetToMenu();
             } else {
               char msg[24];
-              snprintf(msg, sizeof(msg), "Sai! Con %d lan", MAX_FAIL - failCount);
+              snprintf(msg, sizeof(msg), "Sai! Con %d lan",
+                       MAX_FAIL - failCount);
               OLED_ShowText("== SAI MAT KHAU ==", msg, "Thu lai...");
               HAL_Delay(1500);
               OLED_ShowPinEntry();
@@ -593,9 +659,9 @@ int main(void)
         }
       }
 
-    // ══════════════════════════════════════
-    //  NHẬP MÃ OTP
-    // ══════════════════════════════════════
+      // ══════════════════════════════════════
+      //  NHẬP MÃ OTP
+      // ══════════════════════════════════════
     } else if (sysState == STATE_INPUT_OTP) {
       if (otpIndex > 0 && (HAL_GetTick() - lastActionTime > 10000)) {
         ResetToMenu();
@@ -612,11 +678,13 @@ int main(void)
           } else {
             ResetToMenu();
           }
-          if (sysState == STATE_INPUT_OTP) OLED_ShowOTPEntry();
+          if (sysState == STATE_INPUT_OTP)
+            OLED_ShowOTPEntry();
 
         } else if (key == '#') {
           if (otpIndex == 0) {
-            OLED_ShowText("== NHAP MA OTP ==", "Chua nhap ma!", "Nhap roi nhan #");
+            OLED_ShowText("== NHAP MA OTP ==", "Chua nhap ma!",
+                          "Nhap roi nhan #");
             HAL_Delay(1000);
             OLED_ShowOTPEntry();
           } else {
@@ -627,7 +695,8 @@ int main(void)
 
             sysState = STATE_WAIT_OTP;
             lastActionTime = HAL_GetTick();
-            OLED_ShowText("== XAC MINH OTP ==", "Dang kiem tra...", "Vui long cho");
+            OLED_ShowText("== XAC MINH OTP ==", "Dang kiem tra...",
+                          "Vui long cho");
 
             otpIndex = 0;
             memset(otpBuffer, 0, sizeof(otpBuffer));
@@ -642,9 +711,9 @@ int main(void)
         }
       }
 
-    // ══════════════════════════════════════
-    //  CHỜ SERVER XÁC MINH OTP
-    // ══════════════════════════════════════
+      // ══════════════════════════════════════
+      //  CHỜ SERVER XÁC MINH OTP
+      // ══════════════════════════════════════
     } else if (sysState == STATE_WAIT_OTP) {
       if (HAL_GetTick() - lastActionTime > 10000) {
         OLED_ShowText("== HET HAN ==", "Server khong phan hoi", "");
@@ -652,18 +721,30 @@ int main(void)
         ResetToMenu();
       }
 
-    // ══════════════════════════════════════
-    //  CHờ QUÉT VÂN TAY (LAYER 2 TẠI CHỖ)
-    // ══════════════════════════════════════
+      // ══════════════════════════════════════
+      //  CHờ QUÉT VÂN TAY (LAYER 2 TẠI CHỖ)
+      // ══════════════════════════════════════
     } else if (sysState == STATE_WAIT_FINGER) {
       // Timeout 15s
       if (HAL_GetTick() - lastActionTime > 15000) {
-        OLED_ShowText("== HET HAN ==", "Khong quet van tay", "Vui long thu lai");
+        OLED_ShowText("== HET HAN ==", "Khong quet van tay",
+                      "Vui long thu lai");
         HAL_Delay(2000);
         ResetToMenu();
       } else {
         // Thử đọc vân tay
         uint8_t imgRet = AS608_GetImage();
+        if (imgRet != AS608_OK && imgRet != AS608_NO_FINGER) {
+          // AS608 trả về lỗi bất thường → đếm
+          as608ErrorCount++;
+          if (as608ErrorCount >= 5) {
+            // Auto-recovery: reinit UART3
+            MX_USART3_UART_Init();
+            as608ErrorCount = 0;
+          }
+        } else {
+          as608ErrorCount = 0; // Reset đếm khi hoạt động bình thường
+        }
         if (imgRet == AS608_OK) {
           // Có ngón tay, tạo đặc trưng và tìm kiếm
           if (AS608_GenChar(1) == AS608_OK) {
@@ -672,7 +753,8 @@ int main(void)
             if (searchRet == AS608_OK && result.status == AS608_OK) {
               // ✅ Vân tay khớp
               char line2[22];
-              snprintf(line2, sizeof(line2), "ID:%d (%d%%)", result.finger_id, result.confidence / 100);
+              snprintf(line2, sizeof(line2), "ID:%d (%d%%)", result.finger_id,
+                       result.confidence / 100);
               OLED_ShowText("== MO KHOA ==", line2, "Van tay hop le!");
               Relay_Open();
               sysState = STATE_VAULT_OPEN;
@@ -686,52 +768,79 @@ int main(void)
               // ❌ Vân tay không khớp
               fingerFailCount++;
               if (fingerFailCount >= 3) {
-                OLED_ShowText("!! THAT BAI !!", "3 lan sai lien tiep", "Quay ve menu");
+                OLED_ShowText("!! THAT BAI !!", "3 lan sai lien tiep",
+                              "Quay ve menu");
+                Buzzer_Beep(3, 300, 200);
                 UART_SendString("FINGER_FAIL\n");
                 HAL_Delay(2000);
                 ResetToMenu();
               } else {
                 char msg[24];
-                snprintf(msg, sizeof(msg), "Con %d lan thu", 3 - fingerFailCount);
+                snprintf(msg, sizeof(msg), "Con %d lan thu",
+                         3 - fingerFailCount);
                 OLED_ShowText("Van tay SAI!", msg, "Thu lai...");
                 HAL_Delay(1500);
-                OLED_ShowText("== QUET VAN TAY ==", "Dat ngon tay len", "cam bien...");
+                OLED_ShowText("== QUET VAN TAY ==", "Dat ngon tay len",
+                              "cam bien...");
               }
             }
           } else {
             OLED_ShowText("Anh khong ro!", "Thu lai...", "");
             HAL_Delay(1000);
-            OLED_ShowText("== QUET VAN TAY ==", "Dat ngon tay len", "cam bien...");
+            OLED_ShowText("== QUET VAN TAY ==", "Dat ngon tay len",
+                          "cam bien...");
           }
         }
         // Nếu AS608_NO_FINGER → chưa đặt ngón tay, tiếp tục lặp
       }
 
-    // ══════════════════════════════════════
-    //  CHờ QUÉT MẶT TỪ XA (Web)
-    // ══════════════════════════════════════
+      // ══════════════════════════════════════
+      //  CHờ QUÉT MẶT TỪ XA (Web)
+      // ══════════════════════════════════════
     } else if (sysState == STATE_WAIT_FACE) {
       if (HAL_GetTick() - lastActionTime > 15000) {
-        OLED_ShowText("== HET HAN ==", "Qua 15s khong quet", "Vui long thu lai");
+        OLED_ShowText("== HET HAN ==", "Qua 15s khong quet",
+                      "Vui long thu lai");
         HAL_Delay(2000);
         ResetToMenu();
       }
 
-    // ══════════════════════════════════════
-    //  KÉT ĐANG MỞ (Auto-lock 5s)
-    // ══════════════════════════════════════
+      // ══════════════════════════════════════
+      //  KÉT ĐANG MỞ (CTHT + Auto-lock relay 3s)
+      // ══════════════════════════════════════
     } else if (sysState == STATE_VAULT_OPEN) {
-      if (HAL_GetTick() - lastActionTime > 5000) {
+      if (HAL_GetTick() - lastActionTime <= 3000) {
+        // Trong 3 giây đầu: KHÔNG QUAN TÂM công tắc hành trình
+        // (Không làm gì cả để người dùng kéo cửa)
+      } else {
+        // Hết 3 giây: Đóng chốt relay
         Relay_Close();
-        OLED_ShowText("== KET DA KHOA ==", "Tu dong khoa", "");
-        HAL_Delay(1500);
-        ResetToMenu();
-        UART_SendString("ACK:LOCKED\n");
+
+        // Bây giờ mới đọc trạng thái công tắc hành trình
+        uint8_t doorNow = HAL_GPIO_ReadPin(CTHT_GPIO_Port, CTHT_Pin);
+        
+        if (doorNow == GPIO_PIN_RESET) {
+          // Công tắc bị nhấn (RESET) -> Cửa ĐÃ ĐÓNG (nhấn mới tính là đóng)
+          OLED_ShowText("TRANG THAI", "CLOSE", "");
+          UART_SendString("ACK:LOCKED\n");
+          doorOpenWarned = 0;
+          HAL_Delay(1500);
+          ResetToMenu();
+        } else {
+          // Công tắc đang nhả -> Cửa ĐANG MỞ
+          // Kiểm tra xem đã quá thời gian cảnh báo 20s chưa
+          if (!doorOpenWarned && (HAL_GetTick() - lastActionTime > DOOR_OPEN_WARN_MS)) {
+            doorOpenWarned = 1;
+            OLED_ShowText("!! CANH BAO !!", "Cua mo qua lau!", "Vui long dong cua");
+            Buzzer_Beep(5, 200, 150);
+            UART_SendString("DOOR_OPEN_LONG\n");
+          }
+        }
       }
 
-    // ══════════════════════════════════════
-    //  ĐĂNG KÝ VÂN TAY MỚI (từ Web)
-    // ══════════════════════════════════════
+      // ══════════════════════════════════════
+      //  ĐĂNG KÝ VÂN TAY MỚI (từ Web)
+      // ══════════════════════════════════════
     } else if (sysState == STATE_ENROLL_FINGER) {
       // Timeout 30s
       if (HAL_GetTick() - lastActionTime > 30000) {
@@ -747,7 +856,8 @@ int main(void)
             if (AS608_GenChar(1) == AS608_OK) {
               enrollStep = 1;
               lastActionTime = HAL_GetTick();
-              OLED_ShowText("== LAN 1 OK ==", "Nhac ngon tay ra", "roi dat lai...");
+              OLED_ShowText("== LAN 1 OK ==", "Nhac ngon tay ra",
+                            "roi dat lai...");
             } else {
               OLED_ShowText("Anh khong ro!", "Thu lai...", "");
               HAL_Delay(1000);
@@ -793,7 +903,8 @@ int main(void)
             } else {
               OLED_ShowText("Anh khong ro!", "Thu lai...", "");
               HAL_Delay(1000);
-              OLED_ShowText("== LAN 2 ==", "Dat lai ngon tay", "len cam bien...");
+              OLED_ShowText("== LAN 2 ==", "Dat lai ngon tay",
+                            "len cam bien...");
             }
           }
         }
@@ -806,17 +917,16 @@ int main(void)
 }
 
 /**
-  * @brief System Clock Configuration
-  * @retval None
-  */
-void SystemClock_Config(void)
-{
+ * @brief System Clock Configuration
+ * @retval None
+ */
+void SystemClock_Config(void) {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
+   * in the RCC_OscInitTypeDef structure.
+   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
@@ -824,33 +934,30 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
     Error_Handler();
   }
 
   /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+   */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
+                                RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
-  {
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) {
     Error_Handler();
   }
 }
 
 /**
-  * @brief I2C1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_I2C1_Init(void)
-{
+ * @brief I2C1 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_I2C1_Init(void) {
 
   /* USER CODE BEGIN I2C1_Init 0 */
 
@@ -868,23 +975,20 @@ static void MX_I2C1_Init(void)
   hi2c1.Init.OwnAddress2 = 0;
   hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
   hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
-  {
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK) {
     Error_Handler();
   }
   /* USER CODE BEGIN I2C1_Init 2 */
 
   /* USER CODE END I2C1_Init 2 */
-
 }
 
 /**
-  * @brief USART1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART1_UART_Init(void)
-{
+ * @brief USART1 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_USART1_UART_Init(void) {
 
   /* USER CODE BEGIN USART1_Init 0 */
 
@@ -901,23 +1005,20 @@ static void MX_USART1_UART_Init(void)
   huart1.Init.Mode = UART_MODE_TX_RX;
   huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
   huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart1) != HAL_OK)
-  {
+  if (HAL_UART_Init(&huart1) != HAL_OK) {
     Error_Handler();
   }
   /* USER CODE BEGIN USART1_Init 2 */
 
   /* USER CODE END USART1_Init 2 */
-
 }
 
 /**
-  * @brief USART3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART3_UART_Init(void)
-{
+ * @brief USART3 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_USART3_UART_Init(void) {
 
   /* USER CODE BEGIN USART3_Init 0 */
 
@@ -934,23 +1035,20 @@ static void MX_USART3_UART_Init(void)
   huart3.Init.Mode = UART_MODE_TX_RX;
   huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
   huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart3) != HAL_OK)
-  {
+  if (HAL_UART_Init(&huart3) != HAL_OK) {
     Error_Handler();
   }
   /* USER CODE BEGIN USART3_Init 2 */
 
   /* USER CODE END USART3_Init 2 */
-
 }
 
 /**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_GPIO_Init(void)
-{
+ * @brief GPIO Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_GPIO_Init(void) {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
@@ -977,8 +1075,8 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pins : key_Pin keyA1_Pin keyA2_Pin keyA3_Pin
                            keyA4_Pin keyA5_Pin keyA6_Pin */
-  GPIO_InitStruct.Pin = key_Pin|keyA1_Pin|keyA2_Pin|keyA3_Pin
-                          |keyA4_Pin|keyA5_Pin|keyA6_Pin;
+  GPIO_InitStruct.Pin = key_Pin | keyA1_Pin | keyA2_Pin | keyA3_Pin |
+                        keyA4_Pin | keyA5_Pin | keyA6_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
@@ -989,11 +1087,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(touch_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : button_Pin */
-  GPIO_InitStruct.Pin = button_Pin;
+  /*Configure GPIO pins : button_Pin CTHT_Pin */
+  GPIO_InitStruct.Pin = button_Pin | CTHT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(button_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : SW420_Pin */
   GPIO_InitStruct.Pin = SW420_Pin;
@@ -1017,14 +1115,14 @@ static void MX_GPIO_Init(void)
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
   // Override CubeMX: Keypad Rows PA0-PA3 = Output Push-Pull
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3;
+  GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   // Override CubeMX: Keypad Cols PA4-PA6 = Input Pull-Up
-  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6;
+  GPIO_InitStruct.Pin = GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
@@ -1049,24 +1147,25 @@ void EnterSleepMode(void) {
   // 1. Tắt màn hình OLED
   ssd1306_Fill(Black);
   ssd1306_UpdateScreen(&hi2c1);
-  ssd1306_SetDisplayOn(&hi2c1, 0);  // Display OFF
+  ssd1306_SetDisplayOn(&hi2c1, 0); // Display OFF
 
   // 2. Đảm bảo Relay đang khóa
   Relay_Close();
 
-  // 3. Cấu hình PA10 (UART1_RX) thành ngắt EXTI để đánh thức từ ESP32
+  // 3. Thông báo ESP32 rằng STM32 đang ngủ
+  UART_SendString("SLEEPING\n");
+  HAL_Delay(50); // Chờ UART truyền xong trước khi tắt
+
+  // 4. Cấu hình PA10 (UART1_RX) thành ngắt EXTI để đánh thức từ ESP32
   //    (UART start bit = falling edge trên RX)
-  HAL_UART_DeInit(&huart1);  // Tắt UART1 tạm thời
+  HAL_UART_DeInit(&huart1); // Tắt UART1 tạm thời
   GPIO_InitTypeDef gpioInit = {0};
   gpioInit.Pin = GPIO_PIN_10;
-  gpioInit.Mode = GPIO_MODE_IT_FALLING;  // Start bit UART = falling edge
+  gpioInit.Mode = GPIO_MODE_IT_FALLING; // Start bit UART = falling edge
   gpioInit.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &gpioInit);
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-
-  // 4. Thông báo ESP32 rằng STM32 đang ngủ
-  // (UART đã tắt nên không gửi được, ESP32 sẽ tự detect qua heartbeat)
 
   // 5. Đi vào STOP Mode - CPU dừng hoàn toàn tại đây
   HAL_SuspendTick();
@@ -1081,14 +1180,14 @@ void WakeupFromSleep(void) {
 
   // 2. Tắt ngắt EXTI trên PA10, xóa pending bit, khôi phục UART1
   HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
-  __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_10);  // Xóa EXTI pending bit
-  HAL_GPIO_DeInit(GPIOA, GPIO_PIN_10);    // DeInit PA10 khỏi mode EXTI
-  MX_USART1_UART_Init();                  // Reinit UART1 (PA9 TX + PA10 RX)
-  HAL_Delay(10);                          // Chờ UART ổn định
+  __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_10); // Xóa EXTI pending bit
+  HAL_GPIO_DeInit(GPIOA, GPIO_PIN_10);   // DeInit PA10 khỏi mode EXTI
+  MX_USART1_UART_Init();                 // Reinit UART1 (PA9 TX + PA10 RX)
+  HAL_Delay(10);                         // Chờ UART ổn định
   HAL_UART_Receive_IT(&huart1, &uartRxByte, 1);
 
   // 3. Bật lại màn hình OLED
-  ssd1306_SetDisplayOn(&hi2c1, 1);  // Display ON
+  ssd1306_SetDisplayOn(&hi2c1, 1); // Display ON
 
   // 4. Reset trạng thái
   isSleeping = 0;
@@ -1115,14 +1214,14 @@ void WakeupFromSleep(void) {
   if (wakeupSource == 2) {
     OLED_ShowText("== DANG XU LY ==", "Lenh tu xa...", "");
     uint32_t waitStart = HAL_GetTick();
-    while (HAL_GetTick() - waitStart < 2000) {  // Chờ tối đa 2 giây
+    while (HAL_GetTick() - waitStart < 2000) { // Chờ tối đa 2 giây
       // Khôi phục UART RX nếu bị lỗi
       if (huart1.RxState == HAL_UART_STATE_READY) {
         HAL_UART_Receive_IT(&huart1, &uartRxByte, 1);
       }
       if (uartCmdReady) {
         ProcessUARTCommand();
-        break;  // Đã nhận và xử lý lệnh → thoát vòng chờ
+        break; // Đã nhận và xử lý lệnh → thoát vòng chờ
       }
       HAL_Delay(10);
     }
@@ -1137,20 +1236,23 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     // Cảm biến chạm PA7 kích hoạt
     wakeupSource = 1;
     lastActionTime = HAL_GetTick();
-  }
-  else if (GPIO_Pin == GPIO_PIN_10) {
+  } else if (GPIO_Pin == GPIO_PIN_10) {
     // PA10 (UART1 RX) - ESP32 gửi dữ liệu → đánh thức
     wakeupSource = 2;
     lastActionTime = HAL_GetTick();
-  }
-  else if (GPIO_Pin == SW420_Pin) {
-    // CHỈ BÁO ĐỘNG NẾU KÉT KHÔNG PHẢI Ở TRẠNG THÁI ĐÃ MỞ (Tức là đang khóa)
-    if (sysState != STATE_VAULT_OPEN) {
-      // Cảm biến rung kích hoạt
-      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
-      UART_SendString("WARNING:VIBRATION\n");
-      wakeupSource = 3;
-      lastActionTime = HAL_GetTick();
+  } else if (GPIO_Pin == SW420_Pin) {
+    // Ghi nhận rung lắc nếu cửa ĐANG ĐÓNG (CTHT = RESET) và đã đóng được hơn 5s
+    // (tránh dư chấn khi vừa đóng cửa).
+    // Không cảnh báo ngay để chờ 2s xem có phải do rơ-le mở khóa gây rung không.
+    if (HAL_GPIO_ReadPin(CTHT_GPIO_Port, CTHT_Pin) == GPIO_PIN_RESET) {
+      if (HAL_GetTick() - doorClosedTime > 5000) {
+        if (!vibrationDetected) {
+          vibrationDetected = 1;
+          vibrationTime = HAL_GetTick();
+          wakeupSource = 3;
+          lastActionTime = HAL_GetTick();
+        }
+      }
     }
   }
 }
@@ -1158,11 +1260,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 /* USER CODE END 4 */
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
-void Error_Handler(void)
-{
+ * @brief  This function is executed in case of error occurrence.
+ * @retval None
+ */
+void Error_Handler(void) {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
@@ -1172,14 +1273,13 @@ void Error_Handler(void)
 }
 #ifdef USE_FULL_ASSERT
 /**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
-void assert_failed(uint8_t *file, uint32_t line)
-{
+ * @brief  Reports the name of the source file and the source line number
+ *         where the assert_param error has occurred.
+ * @param  file: pointer to the source file name
+ * @param  line: assert_param error line source number
+ * @retval None
+ */
+void assert_failed(uint8_t *file, uint32_t line) {
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line
      number, ex: printf("Wrong parameters value: file %s on line %d\r\n", file,

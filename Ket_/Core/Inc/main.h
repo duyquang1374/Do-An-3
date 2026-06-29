@@ -83,6 +83,8 @@ void Error_Handler(void);
 #define SW420_EXTI_IRQn EXTI1_IRQn
 #define BUZZER_Pin GPIO_PIN_12
 #define BUZZER_GPIO_Port GPIOB
+#define CTHT_Pin GPIO_PIN_13
+#define CTHT_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

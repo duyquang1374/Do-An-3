@@ -127,12 +127,45 @@ def on_message(client, userdata, msg):
 
             elif event in ("unlocked", "locked"):
                 user = payload.get("trigger", "Unknown")
+                
+                # Ánh xạ tên vân tay
+                method_used = "không xác định"
+                if "Finger" in user:
+                    # Trích xuất số ID (hỗ trợ Finger_0 hoặc Fingerprint_0)
+                    import re
+                    match = re.search(r'\d+', user)
+                    fp_id = match.group() if match else "0"
+                    fps = load_fingerprints()
+                    found_fp = next((f for f in fps if str(f["id"]) == str(fp_id)), None)
+                    user = found_fp["label"] if found_fp else f"Vân tay {fp_id}"
+                    method_used = "vân tay"
+                elif user == "PIN_Bypass_L2":
+                    user = "Người dùng"
+                    method_used = "mật khẩu"
+                elif user.startswith("OTP"):
+                    user = "Người dùng"
+                    method_used = "OTP"
+                elif user == "stm32":
+                    user = "Hệ thống"
+                    method_used = "tự động"
+                elif "Web" in user:
+                    method_used = "Web"
+                else:
+                    method_used = "khuôn mặt"
+
                 status_str = "granted" if event == "unlocked" else "locked"
                 
+                # Lưu thêm detail cho việc hiển thị log đẹp hơn
+                detail_str = ""
+                if event == "unlocked":
+                    detail_str = f"mở khóa bằng {method_used}"
+
                 log_data = {
-                    "user": f"ESP ({user})",
+                    "user": user,
                     "status": status_str,
                     "type": "esp_event", "event": event,
+                    "detail": detail_str,
+                    "method": method_used,
                     "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "timestamp": time.time()
                 }
@@ -170,7 +203,7 @@ def on_message(client, userdata, msg):
                 label = pending_enroll.pop(str(fp_id), f"Fingerprint_{fp_id}")
                 print(f"[APP] ✅ Đăng ký vân tay thành công! ID: {fp_id}, Label: {label}")
                 sse_push("enroll_result", {"status": "ok", "finger_id": fp_id, "label": label})
-                save_log({"user": label, "status": "enrolled", "type": "fingerprint",
+                save_log({"user": label, "status": "enrolled", "type": "fingerprint", "detail": "Đã đăng ký thêm vân tay",
                           "time": time.strftime("%Y-%m-%d %H:%M:%S"), "timestamp": time.time()})
                 # Lưu vào fingerprints.json
                 fps = load_fingerprints()
@@ -183,6 +216,49 @@ def on_message(client, userdata, msg):
                 reason = payload.get("trigger", "Unknown")
                 print(f"[APP] ❌ Đăng ký vân tay thất bại: {reason}")
                 sse_push("enroll_result", {"status": "fail", "reason": reason})
+
+            elif event == "temp_lock_pin":
+                # Nhập sai mật khẩu 3 lần → tạm khóa
+                print("[APP] ⚠️ Nhập sai PIN 3 lần → Tạm khóa két!")
+                save_log({
+                    "user": "Không xác định", "status": "denied",
+                    "type": "security_alert", "detail": "Nhập sai mật khẩu 3 lần - Tạm khóa",
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S"), "timestamp": time.time()
+                })
+                sse_push("security_alert", {
+                    "type": "pin_fail",
+                    "message": "⚠️ Nhập sai mật khẩu 3 lần! Két tạm khóa.",
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S")
+                })
+
+            elif event == "finger_fail":
+                # Quét sai vân tay 3 lần
+                print("[APP] ⚠️ Quét sai vân tay 3 lần!")
+                save_log({
+                    "user": "Không xác định", "status": "denied",
+                    "type": "security_alert", "detail": "Quét sai vân tay 3 lần",
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S"), "timestamp": time.time()
+                })
+                sse_push("security_alert", {
+                    "type": "finger_fail",
+                    "message": "⚠️ Quét sai vân tay 3 lần! Két tạm khóa.",
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S")
+                })
+
+            elif event == "door_open_long":
+                # Cửa két mở quá lâu (>20s)
+                print("[APP] ⚠️ Cửa két mở quá lâu!")
+                log_data = {
+                    "user": "Hệ thống", "status": "warning",
+                    "type": "security_alert", "detail": "Cửa két mở quá 20 giây",
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S"), "timestamp": time.time()
+                }
+                threading.Thread(target=save_log, args=(log_data,), daemon=True).start()
+                sse_push("security_alert", {
+                    "type": "door_open_long",
+                    "message": "🚪 Cửa két mở quá 20 giây! Vui lòng đóng cửa két.",
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S")
+                })
 
     except Exception as e:
         print(f"[MQTT] Lỗi xử lý message: {e}")
@@ -475,7 +551,7 @@ def otp_generate():
         # Gửi OTP xuống ESP32 (tùy chọn, để STM32 biết)
         mqtt_publish_command("set_otp", current_otp)
 
-        save_log({"user": otp_creator, "status": "otp_created", "type": "otp",
+        save_log({"user": otp_creator, "status": "otp_created", "type": "otp", "detail": "Đã tạo mã OTP dùng 1 lần",
                   "time": time.strftime("%Y-%m-%d %H:%M:%S"), "timestamp": time.time()})
 
         print(f"[APP] 🔑 OTP tạo bởi {otp_creator}: {current_otp} (hết hạn sau 5 phút)")
@@ -515,7 +591,7 @@ def register():
             db[name].update({"full_image": images[0], "face_images": images})
         save_db(db)
 
-        save_log({"user": name, "status": "registered", "type": "register",
+        save_log({"user": name, "status": "registered", "type": "register", "detail": "Đã đăng ký thêm khuôn mặt",
                   "image_count": len(images), "time": time.strftime("%Y-%m-%d %H:%M:%S"), "timestamp": time.time()})
         return jsonify({"status": "success", "message": f"Đã đăng ký {name} với {len(images)} ảnh!"})
     except Exception as e:
@@ -679,18 +755,19 @@ def remote_unlock():
 def fingerprint_enroll():
     """Bắt đầu đăng ký vân tay mới. Gửi lệnh xuống STM32 qua MQTT."""
     data = request.json or {}
-    finger_id = data.get("finger_id", None)
-    label     = data.get("label", "Unknown")
+    label = data.get("label", "Unknown")
 
+    # Tự động tìm ID còn trống (0-126)
+    fps = load_fingerprints()
+    used_ids = [int(f["id"]) for f in fps if "id" in f]
+    finger_id = None
+    for i in range(127):
+        if i not in used_ids:
+            finger_id = i
+            break
+            
     if finger_id is None:
-        return jsonify({"status": "error", "message": "Thiếu finger_id"}), 400
-
-    try:
-        finger_id = int(finger_id)
-        if finger_id < 0 or finger_id > 126:
-            return jsonify({"status": "error", "message": "ID phải từ 0-126"}), 400
-    except:
-        return jsonify({"status": "error", "message": "finger_id không hợp lệ"}), 400
+        return jsonify({"status": "error", "message": "Số lượng vân tay đã đạt tối đa (127)"}), 400
 
     # Gửi lệnh qua MQTT
     payload = json.dumps({
